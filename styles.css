@@ -1,0 +1,219 @@
+/* ===== RLI APP - Estilos Personalizados ===== */
+
+/* Fuente base */
+body, .stApp {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 13px;
+}
+
+/* Encabezado empresa */
+.empresa-header {
+    background: #1a3a5c;
+    color: white;
+    padding: 14px 20px;
+    border-radius: 6px;
+    margin-bottom: 18px;
+}
+.empresa-header h2 {
+    margin: 0 0 4px 0;
+    font-size: 17px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.empresa-header .meta {
+    font-size: 12px;
+    opacity: 0.85;
+    line-height: 1.6;
+}
+
+/* Bloque sección */
+.seccion-bloque {
+    background: #ffffff;
+    border: 1px solid #cdd5e0;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+.seccion-titulo {
+    background: #2c5282;
+    color: white;
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 7px 14px;
+}
+
+/* Tabla de cuentas */
+.tabla-cuentas {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+}
+.tabla-cuentas th {
+    background: #eef2f7;
+    color: #2d3748;
+    font-weight: 600;
+    padding: 6px 10px;
+    text-align: left;
+    border-bottom: 2px solid #c3cfe2;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+.tabla-cuentas th.right,
+.tabla-cuentas td.right {
+    text-align: right;
+}
+.tabla-cuentas th.center,
+.tabla-cuentas td.center {
+    text-align: center;
+}
+.tabla-cuentas td {
+    padding: 5px 10px;
+    border-bottom: 1px solid #e8edf3;
+    vertical-align: middle;
+}
+.tabla-cuentas tr:hover td {
+    background: #f7fafc;
+}
+.tabla-cuentas tr.total-row td {
+    background: #ebf4ff;
+    font-weight: 700;
+    border-top: 2px solid #3182ce;
+    border-bottom: 2px solid #3182ce;
+    font-size: 13px;
+}
+.tabla-cuentas tr.subgrupo-header td {
+    background: #f0f4f8;
+    font-weight: 600;
+    color: #4a5568;
+    font-style: italic;
+    font-size: 12px;
+}
+
+/* Código de cuenta */
+.cod {
+    font-family: 'Courier New', monospace;
+    color: #2b6cb0;
+    font-size: 11.5px;
+}
+
+/* Monto */
+.monto {
+    font-family: 'Courier New', monospace;
+    text-align: right;
+}
+.monto-positivo { color: #276749; }
+.monto-negativo { color: #c53030; }
+
+/* Signo */
+.signo {
+    text-align: center;
+    font-weight: 700;
+    font-size: 14px;
+    color: #4a5568;
+    width: 28px;
+}
+
+/* F22 badge */
+.f22 {
+    display: inline-block;
+    background: #ebf8ff;
+    color: #2b6cb0;
+    border: 1px solid #bee3f8;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 11px;
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+}
+
+/* Bloque resultado final */
+.resultado-bloque {
+    background: #f7fafc;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+}
+.resultado-bloque h4 {
+    color: #2c5282;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0 0 12px 0;
+    border-bottom: 2px solid #3182ce;
+    padding-bottom: 6px;
+}
+.resultado-fila {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px dotted #e2e8f0;
+    font-size: 12.5px;
+}
+.resultado-fila:last-child { border-bottom: none; }
+.resultado-label { color: #4a5568; flex: 1; }
+.resultado-valor {
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+    font-size: 13px;
+    text-align: right;
+    min-width: 140px;
+}
+.resultado-signo {
+    width: 30px;
+    text-align: center;
+    color: #718096;
+    font-weight: 700;
+}
+.resultado-fila.destacado .resultado-label { font-weight: 700; color: #1a365d; }
+.resultado-fila.destacado .resultado-valor { color: #1a365d; font-size: 14px; }
+.resultado-fila.idpc { background: #fff5f5; border-radius: 4px; padding: 6px 8px; margin: 4px 0; }
+.resultado-fila.idpc .resultado-valor { color: #c53030; }
+.resultado-fila.saldo-positivo .resultado-valor { color: #276749; }
+.resultado-fila.saldo-negativo .resultado-valor { color: #c53030; }
+
+/* Botones de modo */
+.btn-modo {
+    display: inline-block;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 2px solid;
+    transition: all 0.2s;
+}
+.btn-con-ahorro { background: #276749; color: white; border-color: #276749; }
+.btn-sin-ahorro { background: #2c5282; color: white; border-color: #2c5282; }
+
+/* Alerta cuenta no encontrada */
+.alerta-cuenta {
+    background: #fffaf0;
+    border-left: 3px solid #dd6b20;
+    padding: 4px 8px;
+    font-size: 11.5px;
+    color: #7b341e;
+    border-radius: 2px;
+}
+
+/* Tabla resumen final */
+.tabla-resumen {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+.tabla-resumen td {
+    padding: 6px 10px;
+    font-size: 13px;
+    border-bottom: 1px solid #e2e8f0;
+}
+.tabla-resumen td:last-child { text-align: right; font-family: 'Courier New', monospace; font-weight: 600; }
+.tabla-resumen tr.linea-doble td { border-top: 2px solid #2c5282; }
+.tabla-resumen tr.total-final td { font-weight: 700; font-size: 14px; background: #ebf4ff; }
+
+/* Separador */
+hr.sep { border: none; border-top: 1px solid #e2e8f0; margin: 12px 0; }
