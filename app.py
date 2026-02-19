@@ -24,6 +24,7 @@ from regimen_14d3 import (
     calcular_sin_incentivo,
     calcular_con_incentivo,
     CODIGOS_REMUNERACIONES,
+    CUENTAS_EGRESOS_DEFAULT,
     fmt_monto,
     UF_DEFECTO,
     TASA_IDPC,
@@ -384,11 +385,21 @@ def render_ingresos(cuentas: dict):
         col_nombre.markdown(nombre_display)
 
         key_m = _monto_editable_key(linea.codigo + str(i), "ing")
-        monto_val = st.session_state["montos_editados"].get(key_m, linea.monto)
-        nuevo_monto = col_monto.number_input(
-            "", value=monto_val, min_value=0, step=1000, key=key_m, label_visibility="collapsed"
-        )
-        st.session_state["montos_editados"][key_m] = nuevo_monto
+        
+        if not linea.es_manual:
+            # TEXTO PLANO
+            monto_val = linea.monto
+            col_monto.markdown(f"**{fmt_monto(monto_val)}**", unsafe_allow_html=True)
+            st.session_state["montos_editados"][key_m] = monto_val
+            nuevo_monto = monto_val
+        else:
+            # INPUT EDITABLE
+            monto_val = st.session_state["montos_editados"].get(key_m, linea.monto)
+            nuevo_monto = col_monto.number_input(
+                "", value=monto_val, min_value=0, step=1000, key=key_m, label_visibility="collapsed"
+            )
+            st.session_state["montos_editados"][key_m] = nuevo_monto
+        
         total += nuevo_monto
 
         col_signo.markdown(f"<div class='signo'>{linea.signo}</div>", unsafe_allow_html=True)
@@ -446,98 +457,153 @@ def render_egresos(cuentas: dict):
     st.markdown("<hr class='sep'>", unsafe_allow_html=True)
 
     total = 0
-    es_grupo_rem = False
-    lineas_fijas_len = 9
     idxs_eliminar = []
-    rem_montos = {}
+    
+    # Vamos a iterar usando while para poder agrupar remuneraciones
+    i = 0
+    n = len(lineas)
+    
+    while i < n:
+        linea = lineas[i]
+        
+        # Detectar inicio de bloque remuneraciones
+        if linea.codigo in CODIGOS_REMUNERACIONES:
+            # Agrupar todas las líneas consecutivas que sean de remuneraciones
+            grupo_rem = []
+            while i < n and lineas[i].codigo in CODIGOS_REMUNERACIONES:
+                grupo_rem.append((i, lineas[i]))
+                i += 1
+            
+            # --- Pre-calcular total para mostrarlo ARRIBA ---
+            total_rem_display = 0
+            
+            # 1. Sumar fijos (Extrados => No editables => Usar valor linea.monto)
+            for idx_orig, l_rem in grupo_rem:
+                # Al ser fijo/extraído, asumimos no editable
+                total_rem_display += int(l_rem.monto)
+            
+            # 2. Sumar extras (Manuales => Usar widget o valor guardado)
+            for j, extra_rem in enumerate(st.session_state["extras_remuneraciones"]):
+                key_rem = _monto_editable_key(extra_rem["codigo"] + f"rem{j}", "rem")
+                if key_rem in st.session_state:
+                    val = st.session_state[key_rem]
+                else:
+                    val = st.session_state["montos_editados"].get(key_rem, extra_rem["monto"])
+                total_rem_display += int(val)
 
-    for i, linea in enumerate(lineas):
-        es_rem = linea.codigo in CODIGOS_REMUNERACIONES
+            # --- Renderizar Resumen Remuneraciones (ARRIBA) ---
+            total += total_rem_display
+            
+            crem1, crem2, crem3, crem4, crem5, crem6 = st.columns([1.2, 4, 2, 0.6, 1, 1])
+            crem1.markdown("")
+            crem2.markdown("<strong>Remuneraciones Pagadas (Total)</strong>", unsafe_allow_html=True)
+            crem3.markdown(f"<strong>{fmt_monto(total_rem_display)}</strong>", unsafe_allow_html=True)
+            crem4.markdown("<div class='signo'>+</div>", unsafe_allow_html=True)
+            crem5.markdown(_badge_f22("1411"), unsafe_allow_html=True)
+            
 
-        # — Encabezado grupo remuneraciones —
-        if es_rem and not es_grupo_rem:
-            es_grupo_rem = True
-            st.markdown(
-                "<div style='background:#edf2f7;padding:5px 10px;border-left:3px solid #4a5568;'>"
-                "<em><strong>Remuneraciones</strong></em></div>",
-                unsafe_allow_html=True,
-            )
+            # --- Renderizar bloque colapsable indentado ---
+            _col_indent, col_expander = st.columns([0.15, 9.85])
+            with col_expander:
+                st.markdown(
+                    "<div style='border-left: 3px solid #CBD5E0; padding-left: 10px; margin-top:-16px; margin-bottom:4px;'>",
+                    unsafe_allow_html=True
+                )
+                with st.expander("📝 Ver detalle Remuneraciones", expanded=False):
+                    # 1. Cuentas fijas del grupo
+                    for idx_orig, l_rem in grupo_rem:
+                        col_cod_r, col_nom_r, col_monto_r, col_sig_r, col_f22_r, col_acc_r = st.columns(
+                            [1.2, 4, 2, 0.6, 1, 1]
+                        )
+                        col_cod_r.markdown(f"<span class='cod'>{l_rem.codigo}</span>", unsafe_allow_html=True)
+                        
+                        nom = l_rem.nombre
+                        if not l_rem.existe_en_balance:
+                            nom += " ⚠️"
+                        col_nom_r.markdown(nom)
+                        
+                        key_m = _monto_editable_key(l_rem.codigo + str(idx_orig), "egr")
+                        monto_val = l_rem.monto
+                        col_monto_r.markdown(f"**{fmt_monto(monto_val)}**", unsafe_allow_html=True)
+                        st.session_state["montos_editados"][key_m] = monto_val
 
-        col_cod_r, col_nom_r, col_monto_r, col_sig_r, col_f22_r, col_acc_r = st.columns(
-            [1.2, 4, 2, 0.6, 1, 1]
-        )
-        col_cod_r.markdown(f"<span class='cod'>{linea.codigo}</span>", unsafe_allow_html=True)
-        col_nom_r.markdown(linea.nombre + (" ⚠️" if not linea.existe_en_balance else ""))
+                    # 2. Extras de remuneraciones
+                    for j, extra_rem in enumerate(st.session_state["extras_remuneraciones"]):
+                        key_rem = _monto_editable_key(extra_rem["codigo"] + f"rem{j}", "rem")
+                        monto_rem_val = st.session_state["montos_editados"].get(
+                            key_rem, extra_rem["monto"]
+                        )
+                        
+                        cr1, cr2, col_m_extra, cr4, cr5, cr6 = st.columns([1.2, 4, 2, 0.6, 1, 1])
+                        
+                        cr1.markdown(f"<span class='cod'>{extra_rem['codigo']}</span>",
+                                     unsafe_allow_html=True)
+                        cr2.markdown(extra_rem["nombre"])
+                        
+                        monto_rem_nuevo = col_m_extra.number_input(
+                            "", value=monto_rem_val, min_value=0, step=1000,
+                            key=key_rem, label_visibility="collapsed"
+                        )
+                        st.session_state["montos_editados"][key_rem] = monto_rem_nuevo
+                        
+                        if cr6.button("🗑️", key=f"del_rem_{j}"):
+                            st.session_state["extras_remuneraciones"].pop(j)
+                            st.rerun()
 
-        key_m = _monto_editable_key(linea.codigo + str(i), "egr")
-        monto_val = st.session_state["montos_editados"].get(key_m, linea.monto)
-        nuevo_monto = col_monto_r.number_input(
-            "", value=monto_val, min_value=0, step=1000, key=key_m, label_visibility="collapsed"
-        )
-        st.session_state["montos_editados"][key_m] = nuevo_monto
+                    # Botón agregar subcuenta DENTRO del expander
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("###### Agregar subcuenta a Remuneraciones")
+                    _render_agregar_cuenta(cuentas, "rem", "extras_remuneraciones")
+                
+                st.markdown("</div>", unsafe_allow_html=True)
 
-        if es_rem:
-            rem_montos[linea.codigo] = nuevo_monto
         else:
+            # Renderizado normal de otras cuentas
+            col_cod_r, col_nom_r, col_monto_r, col_sig_r, col_f22_r, col_acc_r = st.columns(
+                [1.2, 4, 2, 0.6, 1, 1]
+            )
+            col_cod_r.markdown(f"<span class='cod'>{linea.codigo}</span>", unsafe_allow_html=True)
+            
+            nombre_display = linea.nombre + (" ⚠️" if not linea.existe_en_balance else "")
+            col_nom_r.markdown(nombre_display)
+
+            key_m = _monto_editable_key(linea.codigo + str(i), "egr")
+            
+            if not linea.es_manual:
+                monto_val = linea.monto
+                col_monto_r.markdown(f"**{fmt_monto(monto_val)}**", unsafe_allow_html=True)
+                st.session_state["montos_editados"][key_m] = monto_val
+                nuevo_monto = monto_val
+            else:
+                monto_val = st.session_state["montos_editados"].get(key_m, linea.monto)
+                nuevo_monto = col_monto_r.number_input(
+                    "", value=monto_val, min_value=0, step=1000, key=key_m, label_visibility="collapsed"
+                )
+                st.session_state["montos_editados"][key_m] = nuevo_monto
+
             total += nuevo_monto
 
-        if linea.codigo not in CODIGOS_REMUNERACIONES:
             col_sig_r.markdown("<div class='signo'>+</div>", unsafe_allow_html=True)
             col_f22_r.markdown(_badge_f22(linea.f22), unsafe_allow_html=True)
 
-        if linea.es_manual:
-            if col_acc_r.button("🗑️", key=f"del_egr_{i}", help="Eliminar"):
-                idxs_eliminar.append(i)
-
-        # ¿Es la última cuenta del grupo remuneraciones? → cierre del bloque
-        siguiente_es_rem = (
-            i + 1 < len(lineas) and lineas[i + 1].codigo in CODIGOS_REMUNERACIONES
-        )
-        if es_rem and not siguiente_es_rem:
-            es_grupo_rem = False
-
-            # — Extras de remuneraciones —
-            for j, extra_rem in enumerate(st.session_state["extras_remuneraciones"]):
-                key_rem = _monto_editable_key(extra_rem["codigo"] + f"rem{j}", "rem")
-                monto_rem_val = st.session_state["montos_editados"].get(
-                    key_rem, extra_rem["monto"]
-                )
-                cr1, cr2, cr3, cr4, cr5 = st.columns([0.3, 0.9, 4, 2, 1])
-                cr1.markdown("")
-                cr2.markdown(f"<span class='cod'>{extra_rem['codigo']}</span>",
-                             unsafe_allow_html=True)
-                cr3.markdown(extra_rem["nombre"])
-                monto_rem_nuevo = cr4.number_input(
-                    "", value=monto_rem_val, min_value=0, step=1000,
-                    key=key_rem, label_visibility="collapsed"
-                )
-                st.session_state["montos_editados"][key_rem] = monto_rem_nuevo
-                rem_montos[extra_rem["codigo"]] = monto_rem_nuevo
-                if cr5.button("🗑️", key=f"del_rem_{j}"):
-                    st.session_state["extras_remuneraciones"].pop(j)
-                    st.rerun()
-
-            # Botón agregar subcuenta a remuneraciones
-            with st.expander("➕ Agregar subcuenta a Remuneraciones"):
-                _render_agregar_cuenta(cuentas, "rem", "extras_remuneraciones")
-
-            # Subtotal remuneraciones
-            total_rem = sum(rem_montos.values())
-            total += total_rem
-            crem1, crem2, crem3, crem4 = st.columns([1.2, 4, 2, 1.6])
-            crem1.markdown("")
-            crem2.markdown("**Remuneraciones Pagadas**")
-            crem3.markdown(f"**{fmt_monto(total_rem)}**")
-            crem4.markdown(_badge_f22("1411"), unsafe_allow_html=True)
-            st.markdown("<hr class='sep'>", unsafe_allow_html=True)
+            if linea.es_manual:
+                if col_acc_r.button("🗑️", key=f"del_egr_{i}", help="Eliminar"):
+                    idxs_eliminar.append(i)
+            
+            i += 1
 
     # Eliminar extras de egresos
+    # Re-implementar borrado robusto
+    # Los extras están al final de la lista 'lineas'.
+    # Cuantos defaults hay?
+    num_defaults = len(CUENTAS_EGRESOS_DEFAULT)
+    
     for idx in sorted(set(idxs_eliminar), reverse=True):
-        extra_idx = idx - lineas_fijas_len
-        if 0 <= extra_idx < len(st.session_state["extras_egresos"]):
-            st.session_state["extras_egresos"].pop(extra_idx)
-            st.rerun()
-
+        if idx >= num_defaults:
+            extra_idx = idx - num_defaults
+            if 0 <= extra_idx < len(st.session_state["extras_egresos"]):
+                st.session_state["extras_egresos"].pop(extra_idx)
+                st.rerun()
     st.markdown("<hr class='sep'>", unsafe_allow_html=True)
 
     # Agregar cuenta — selector inteligente
@@ -583,10 +649,20 @@ def render_gastos_rechazados(cuentas: dict):
         col_nom_r.markdown(nombre_display)
 
         key_m = _monto_editable_key(linea.codigo + str(i), "gst")
-        monto_val = st.session_state["montos_editados"].get(key_m, linea.monto)
-        nuevo_monto = col_monto_r.number_input("", value=monto_val, min_value=0, step=1000,
-                                               key=key_m, label_visibility="collapsed")
-        st.session_state["montos_editados"][key_m] = nuevo_monto
+        
+        if not linea.es_manual:
+             # TEXTO PLANO
+            monto_val = linea.monto
+            col_monto_r.markdown(f"**{fmt_monto(monto_val)}**", unsafe_allow_html=True)
+            st.session_state["montos_editados"][key_m] = monto_val
+            nuevo_monto = monto_val
+        else:
+             # INPUT EDITABLE
+            monto_val = st.session_state["montos_editados"].get(key_m, linea.monto)
+            nuevo_monto = col_monto_r.number_input("", value=monto_val, min_value=0, step=1000,
+                                                key=key_m, label_visibility="collapsed")
+            st.session_state["montos_editados"][key_m] = nuevo_monto
+
         total += nuevo_monto
 
         col_sig_r.markdown(f"<div class='signo'>{linea.signo}</div>", unsafe_allow_html=True)
@@ -809,103 +885,223 @@ def _render_export_btn(resultado, modo: str):
 
 
 def _generar_pdf(resultado, modo: str) -> bytes:
-    """Genera PDF con el resultado del cálculo usando reportlab."""
+    """Genera PDF con detalle completo de cuentas y resultado del cálculo."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm
     from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=2*cm, rightMargin=2*cm,
+                            leftMargin=1.8*cm, rightMargin=1.8*cm,
                             topMargin=2*cm, bottomMargin=2*cm)
     styles = getSampleStyleSheet()
     story = []
 
-    emp = st.session_state.get("empresa", {})
-    azul = colors.HexColor("#2c5282")
+    emp       = st.session_state.get("empresa", {})
+    cuentas   = st.session_state.get("cuentas", {})
+    montos_ed = st.session_state.get("montos_editados", {})
 
-    # Estilo encabezado
-    h1 = ParagraphStyle("h1", parent=styles["Heading1"], textColor=azul, fontSize=14, spaceAfter=4)
-    h2 = ParagraphStyle("h2", parent=styles["Heading2"], textColor=azul, fontSize=11, spaceAfter=2)
-    normal = styles["Normal"]
-    small = ParagraphStyle("small", parent=normal, fontSize=9, textColor=colors.HexColor("#4a5568"))
-    bold_style = ParagraphStyle("bold", parent=normal, fontSize=10, fontName="Helvetica-Bold")
+    azul       = colors.HexColor("#2c5282")
+    azul_claro = colors.HexColor("#dbeafe")
+    gris_fila  = colors.HexColor("#f7fafc")
+    gris_linea = colors.HexColor("#e2e8f0")
 
+    h1   = ParagraphStyle("h1",   parent=styles["Heading1"], textColor=azul, fontSize=13, spaceAfter=2)
+    h2   = ParagraphStyle("h2",   parent=styles["Heading2"], textColor=azul, fontSize=10, spaceBefore=8, spaceAfter=2)
+    small= ParagraphStyle("small",parent=styles["Normal"],   fontSize=8,  textColor=colors.HexColor("#4a5568"))
+
+    # ── Encabezado empresa ──────────────────────────────────────────────────
     story.append(Paragraph(emp.get("razon_social", ""), h1))
-    story.append(Paragraph(
-        f"RUT: {emp.get('rut','—')} | Giro: {emp.get('giro','—')} | {emp.get('periodo','—')}",
-        small
-    ))
-    story.append(Spacer(1, 0.4*cm))
-    story.append(Paragraph(f"Régimen 14 D N°3 — {'Sin' if modo=='sin' else 'Con'} Incentivo al Ahorro", h2))
+    dir_full = " | ".join(filter(None, [emp.get("direccion",""), emp.get("comuna","")]))
+    story.append(Paragraph(f"RUT: {emp.get('rut','—')}  |  Giro: {emp.get('giro','—')}", small))
+    if dir_full:
+        story.append(Paragraph(f"Dirección: {dir_full}", small))
+    story.append(Paragraph(f"Período: {emp.get('periodo','—')}", small))
     story.append(Spacer(1, 0.3*cm))
+    story.append(HRFlowable(width="100%", thickness=1, color=azul))
+    story.append(Paragraph(
+        f"Determinación RLI — Régimen 14 D N°3 | {'Sin' if modo=='sin' else 'Con'} Incentivo al Ahorro",
+        h2
+    ))
+    story.append(Spacer(1, 0.2*cm))
 
-    def fila(etiqueta, valor, f22="", signo=""):
+    # ── Helper tabla de detalle ─────────────────────────────────────────────
+    COL_DET = [1.5*cm, 6.2*cm, 3*cm, 1.2*cm, 1.6*cm]
+
+    def _tabla_detalle(filas_data, total_label, total_val):
+        header = [["Código", "Cuenta", "Monto", "Sign.", "SC F22"]]
+        body   = header + filas_data + [["", total_label, fmt_monto(total_val), "(=)", ""]]
+        ts_det = TableStyle([
+            ("BACKGROUND",    (0, 0), (-1, 0), azul),
+            ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
+            ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE",      (0, 0), (-1, -1), 8),
+            ("ALIGN",         (2, 0), (-1, -1), "RIGHT"),
+            ("ALIGN",         (3, 0), (3, -1), "CENTER"),
+            ("ROWBACKGROUNDS",(0, 1), (-1, -2), [colors.white, gris_fila]),
+            ("GRID",          (0, 0), (-1, -1), 0.3, gris_linea),
+            ("TOPPADDING",    (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("BACKGROUND",    (0, -1), (-1, -1), azul_claro),
+            ("FONTNAME",      (0, -1), (-1, -1), "Helvetica-Bold"),
+        ])
+        t = Table(body, colWidths=COL_DET, repeatRows=1)
+        t.setStyle(ts_det)
+        return t
+
+    # ── I. INGRESOS ─────────────────────────────────────────────────────────
+    story.append(Paragraph("I. INGRESOS DEL EJERCICIO", h2))
+    lineas_ing = construir_lineas_ingresos(cuentas, st.session_state.get("extras_ingresos", []))
+    filas_ing = []
+    for idx, l in enumerate(lineas_ing):
+        key   = _monto_editable_key(l.codigo + str(idx), "ing")
+        monto = montos_ed.get(key, l.monto)
+        filas_ing.append([l.codigo, l.nombre, fmt_monto(monto), l.signo, l.f22])
+    story.append(_tabla_detalle(filas_ing, "TOTAL INGRESOS", resultado.total_ingresos))
+    story.append(Spacer(1, 0.35*cm))
+
+    # ── II. EGRESOS ─────────────────────────────────────────────────────────
+    story.append(Paragraph("II. EGRESOS DEL EJERCICIO", h2))
+    lineas_egr = construir_lineas_egresos(cuentas, st.session_state.get("extras_egresos", []))
+    filas_egr  = []
+    rem_bloque = []   # acumula filas de remuneraciones mientras se procesan
+    rem_total  = 0
+
+    idx_e = 0
+    while idx_e < len(lineas_egr):
+        l = lineas_egr[idx_e]
+        if l.codigo in CODIGOS_REMUNERACIONES:
+            key   = _monto_editable_key(l.codigo + str(idx_e), "egr")
+            monto = montos_ed.get(key, l.monto)
+            rem_bloque.append([f"  {l.codigo}", f"  └ {l.nombre}", fmt_monto(monto), "", ""])
+            rem_total += monto
+            idx_e += 1
+        else:
+            if rem_bloque:
+                # Añadir extras remuneraciones
+                for j2, er in enumerate(st.session_state.get("extras_remuneraciones", [])):
+                    key_r = _monto_editable_key(er["codigo"] + f"rem{j2}", "rem")
+                    mv    = montos_ed.get(key_r, er["monto"])
+                    rem_bloque.append([f"  {er['codigo']}", f"  └ {er['nombre']}", fmt_monto(mv), "", ""])
+                    rem_total += mv
+                # Fila resumen remuneraciones
+                filas_egr.append(["", "Remuneraciones Pagadas", fmt_monto(rem_total), "+", "1411"])
+                filas_egr.extend(rem_bloque)
+                rem_bloque = []
+                rem_total  = 0
+
+            key   = _monto_editable_key(l.codigo + str(idx_e), "egr")
+            monto = montos_ed.get(key, l.monto)
+            filas_egr.append([l.codigo, l.nombre, fmt_monto(monto), l.signo, l.f22])
+            idx_e += 1
+
+    # Si termina con bloque rem
+    if rem_bloque:
+        for j2, er in enumerate(st.session_state.get("extras_remuneraciones", [])):
+            key_r = _monto_editable_key(er["codigo"] + f"rem{j2}", "rem")
+            mv    = montos_ed.get(key_r, er["monto"])
+            rem_bloque.append([f"  {er['codigo']}", f"  └ {er['nombre']}", fmt_monto(mv), "", ""])
+            rem_total += mv
+        filas_egr.append(["", "Remuneraciones Pagadas", fmt_monto(rem_total), "+", "1411"])
+        filas_egr.extend(rem_bloque)
+
+    story.append(_tabla_detalle(filas_egr, "TOTAL EGRESOS", resultado.total_egresos))
+    story.append(Spacer(1, 0.35*cm))
+
+    # ── III. GASTOS RECHAZADOS ───────────────────────────────────────────────
+    story.append(Paragraph("III. GASTOS RECHAZADOS", h2))
+    lineas_gst = construir_lineas_gastos_rechazados(cuentas, st.session_state.get("extras_gastos", []))
+    filas_gst  = []
+    for idx, l in enumerate(lineas_gst):
+        key   = _monto_editable_key(l.codigo + str(idx), "gst")
+        monto = montos_ed.get(key, l.monto)
+        filas_gst.append([l.codigo, l.nombre, fmt_monto(monto), l.signo, l.f22])
+    story.append(_tabla_detalle(filas_gst, "TOTAL GASTOS RECHAZADOS", resultado.total_gastos_rechazados))
+    story.append(Spacer(1, 0.4*cm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=gris_linea))
+    story.append(Spacer(1, 0.1*cm))
+
+    # ── IV. CÁLCULO RLI / IDPC ──────────────────────────────────────────────
+    story.append(Paragraph(
+        f"IV. CÁLCULO {'SIN' if modo=='sin' else 'CON'} INCENTIVO AL AHORRO", h2
+    ))
+
+    col_calc = [8.5*cm, 3.5*cm, 1.5*cm, 2*cm]
+
+    def fc(etiqueta, valor, signo="", f22=""):
         return [etiqueta, fmt_monto(valor), signo, f22]
 
-    col_widths = [9*cm, 4*cm, 1.5*cm, 2*cm]
-
     if modo == "sin":
-        data = [
-            ["Concepto", "Monto", "Signo", "SC F22"],
-            fila("Total Ingresos del Ejercicio",  resultado.total_ingresos,  "1600", "(=)"),
-            fila("Total Egresos del Ejercicio",   resultado.total_egresos,   "",     "(-)"),
-            fila("Total Gastos Rechazados",        resultado.total_gastos_rechazados, "1431", "(+)"),
+        data_calc = [
+            ["Concepto", "Monto", "Sign.", "SC F22"],
+            fc("Total Ingresos del Ejercicio",    resultado.total_ingresos,          "(=)", "1600"),
+            fc("Total Egresos del Ejercicio",     resultado.total_egresos,           "(-)", ""),
+            fc("Total Gastos Rechazados",         resultado.total_gastos_rechazados, "(+)", "1431"),
             ["", "", "", ""],
-            fila("BASE IMPONIBLE",                resultado.base_imponible,  "1729", "(=)"),
-            fila(f"IDPC Tasa {TASA_IDPC*100:.1f}%", resultado.idpc_sin_incentivo, "18", "(=)"),
-            fila("101090 PPM",                    resultado.ppm,             "36",  "(-)"),
+            fc("BASE IMPONIBLE",                  resultado.base_imponible,          "(=)", "1729"),
+            fc(f"IDPC Tasa {TASA_IDPC*100:.1f}%",resultado.idpc_sin_incentivo,      "(=)", "18"),
+            fc("101090 PPM",                      resultado.ppm,                     "(-)", "36"),
             ["", "", "", ""],
-            fila("SALDO",                          resultado.saldo_sin_incentivo, "305", "(=)"),
+            fc("SALDO",                           resultado.saldo_sin_incentivo,     "(=)", "305"),
         ]
-        filas_destacadas = {5, 9}
+        destacadas = {5, 9}
     else:
-        data = [
-            ["Concepto", "Monto", "Signo", "SC F22"],
-            fila("Sub Total Base Imponible",       resultado.sub_total_base,   "", "(=)"),
-            fila("101120 Retiros del Ejercicio",   resultado.retiros_ejercicio, "", "(-)"),
-            fila("430102 Multas e Intereses",       resultado.multas_intereses_hist, "", "(-)"),
-            fila("430101 Pago del IDPC",            resultado.idpc_hist,        "", "(-)"),
+        uf_pesos = st.session_state.get("valor_uf", 38000) * st.session_state.get("uf_cantidad", UF_DEFECTO)
+        uf_cant  = int(st.session_state.get("uf_cantidad", UF_DEFECTO))
+        data_calc = [
+            ["Concepto", "Monto", "Sign.", "SC F22"],
+            fc("Total Ingresos del Ejercicio",    resultado.total_ingresos,          "(=)", "1600"),
+            fc("Total Egresos del Ejercicio",     resultado.total_egresos,           "(-)", ""),
+            fc("Total Gastos Rechazados",         resultado.total_gastos_rechazados, "(+)", "1431"),
             ["", "", "", ""],
-            fila("RLI INVERTIDA",                  resultado.rli_invertida,    "", "(=)"),
-            fila("Deducción incentivo al ahorro art. 14 E) LIR",
-                 resultado.deduccion_incentivo, "1432", ""),
+            fc("Sub Total Base Imponible",        resultado.sub_total_base,          "(=)", ""),
+            fc("101120 Retiros del Ejercicio",    resultado.retiros_ejercicio,       "(-)", ""),
+            fc("430102 Multas e Intereses",       resultado.multas_intereses_hist,   "(-)", ""),
+            fc("430101 Pago del IDPC",            resultado.idpc_hist,               "(-)", ""),
             ["", "", "", ""],
-            fila(f"IDPC Tasa {TASA_IDPC*100:.1f}%", resultado.idpc_con_incentivo, "18", "(=)"),
-            fila("101090 PPM",                     resultado.ppm,             "36",  "(-)"),
+            fc("RLI INVERTIDA",                   resultado.rli_invertida,           "(=)", ""),
+            fc(
+                f"Deducción incentivo art. 14 E) LIR  "
+                f"[50% RLI = {fmt_monto(resultado.porcentaje_rli)}  |  "
+                f"Límite {uf_cant:,} UF = {fmt_monto(uf_pesos)}]",
+                resultado.deduccion_incentivo, "", "1432"
+            ),
             ["", "", "", ""],
-            fila("SALDO",                          resultado.saldo_con_incentivo, "305", "(=)"),
+            fc(f"IDPC Tasa {TASA_IDPC*100:.1f}%", resultado.idpc_con_incentivo,    "(=)", "18"),
+            fc("101090 PPM",                       resultado.ppm,                    "(-)", "36"),
+            ["", "", "", ""],
+            fc("SALDO",                            resultado.saldo_con_incentivo,    "(=)", "305"),
         ]
-        filas_destacadas = {6, 12}
+        destacadas = {5, 10, 16}
 
-    ts = TableStyle([
-        ("BACKGROUND",   (0, 0), (-1, 0), azul),
-        ("TEXTCOLOR",    (0, 0), (-1, 0), colors.white),
-        ("FONTNAME",     (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE",     (0, 0), (-1, 0), 9),
-        ("ALIGN",        (1, 0), (1, -1), "RIGHT"),
-        ("ALIGN",        (2, 0), (3, -1), "CENTER"),
-        ("FONTSIZE",     (0, 1), (-1, -1), 9),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7fafc")]),
-        ("GRID",         (0, 0), (-1, -1), 0.4, colors.HexColor("#e2e8f0")),
-        ("TOPPADDING",   (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING",(0, 0), (-1, -1), 4),
+    ts_calc = TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, 0), azul),
+        ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
+        ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE",      (0, 0), (-1, -1), 9),
+        ("ALIGN",         (1, 0), (1, -1), "RIGHT"),
+        ("ALIGN",         (2, 0), (3, -1), "CENTER"),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, gris_fila]),
+        ("GRID",          (0, 0), (-1, -1), 0.4, gris_linea),
+        ("TOPPADDING",    (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ])
-    for row_idx in filas_destacadas:
-        if row_idx < len(data):
-            ts.add("FONTNAME",    (0, row_idx), (-1, row_idx), "Helvetica-Bold")
-            ts.add("BACKGROUND",  (0, row_idx), (-1, row_idx), colors.HexColor("#dbeafe"))
-            ts.add("FONTSIZE",    (0, row_idx), (-1, row_idx), 10)
+    for row_idx in destacadas:
+        if row_idx < len(data_calc):
+            ts_calc.add("FONTNAME",   (0, row_idx), (-1, row_idx), "Helvetica-Bold")
+            ts_calc.add("BACKGROUND", (0, row_idx), (-1, row_idx), azul_claro)
+            ts_calc.add("FONTSIZE",   (0, row_idx), (-1, row_idx), 10)
 
-    t = Table(data, colWidths=col_widths, repeatRows=1)
-    t.setStyle(ts)
-    story.append(t)
+    t_calc = Table(data_calc, colWidths=col_calc, repeatRows=1)
+    t_calc.setStyle(ts_calc)
+    story.append(t_calc)
 
     doc.build(story)
     return buf.getvalue()
+
+
 
 
 # ---------------------------------------------------------------------------

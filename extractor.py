@@ -113,53 +113,74 @@ def extraer_balance(pdf_path: str) -> tuple[dict, dict]:
 # Extracción de datos de empresa
 # ---------------------------------------------------------------------------
 def _extraer_datos_empresa(texto: str, empresa: dict):
-    """Parsea líneas iniciales del PDF para obtener datos de la empresa."""
+    """
+    Parsea líneas iniciales del PDF para obtener datos de la empresa.
+    Estructura esperada (cada dato en su propia línea):
+      Línea 1: Razón Social
+      Línea 2: RUT
+      Línea 3: Giro
+      Línea 4: Dirección
+      Línea 5: Comuna
+    """
     lineas = [l.strip() for l in texto.splitlines() if l.strip()]
 
-    # Buscar RUT en todo el texto
-    for linea in lineas[:5]:
-        ruts = _RUT_PATTERN.findall(linea)
-        if ruts:
-            empresa["rut"] = ruts[0]
-            # Razón social = todo antes del RUT en la misma línea
-            idx = linea.find(empresa["rut"])
-            empresa["razon_social"] = linea[:idx].strip()
-            # Resto de la línea puede contener giro/dirección/comuna
-            resto = linea[idx + len(empresa["rut"]):].strip()
-            _parsear_resto_encabezado(resto, empresa)
-            break
-
-    # Buscar período
+    # Buscar periodo en todo el texto
     texto_upper = texto.upper()
     m = _PERIODO_PATTERN.search(texto_upper)
     if m:
         empresa["periodo"] = f"DESDE {m.group(1)} HASTA {m.group(2)}"
 
-    # Si no se encontró razón social, primera línea no vacía
-    if not empresa["razon_social"] and lineas:
-        empresa["razon_social"] = lineas[0]
+    # Encontrar la línea que contiene el RUT para anclar las demás
+    rut_idx = None
+    for i, linea in enumerate(lineas[:15]):  # Buscar en las primeras 15 líneas
+        ruts = _RUT_PATTERN.findall(linea)
+        if ruts:
+            empresa["rut"] = ruts[0]
+            rut_idx = i
+            break
 
+    if rut_idx is None:
+        # Sin RUT, al menos capturar primera línea como razón social
+        if lineas:
+            empresa["razon_social"] = lineas[0]
+        return
 
-def _parsear_resto_encabezado(resto: str, empresa: dict):
-    """
-    Intenta extraer giro, dirección y comuna del texto restante del encabezado.
-    El PDF de ejemplo concatena todo sin separadores claros; usamos heurísticas.
-    """
-    # Intento con palabras clave de dirección
-    m_dir = re.search(r"((?:CALLE|AV\.|AVENIDA|PASAJE|BOULEVARD|[A-Z]+\s+#\s*\d+).+)", resto, re.IGNORECASE)
-    if m_dir:
-        empresa["giro"] = resto[:m_dir.start()].strip()
-        dir_rest = m_dir.group(1)
-        # Última "palabra" puede ser comuna
-        partes = dir_rest.rsplit(" ", 1)
-        if len(partes) == 2 and len(partes[1]) > 3:
-            empresa["direccion"] = partes[0].strip()
-            empresa["comuna"] = partes[1].strip()
-        else:
-            empresa["direccion"] = dir_rest.strip()
+    # Razón social = línea anterior al RUT (si existe)
+    if rut_idx > 0:
+        empresa["razon_social"] = lineas[rut_idx - 1]
+    
+    # Si el RUT está en la misma línea que la razón social (formato concatenado),
+    # separamos por el RUT
+    linea_rut = lineas[rut_idx]
+    idx_rut_en_linea = linea_rut.find(empresa["rut"])
+    if idx_rut_en_linea > 0:
+        # El RUT y la razón social están en la misma línea
+        empresa["razon_social"] = linea_rut[:idx_rut_en_linea].strip()
+        # El resto de campos vienen después
+        offset = 0
     else:
-        # Sin heurística clara, todo va a giro
-        empresa["giro"] = resto
+        # El RUT está solo en su propia línea
+        offset = 1
+
+    # Los campos siguientes al RUT
+    campos_restantes = lineas[rut_idx + offset:]
+    
+    # Giro = primera línea no vacía después del RUT que no sea periodo
+    giro_idx = None
+    for j, linea in enumerate(campos_restantes):
+        if "BALANCE" in linea.upper() or "DESDE" in linea.upper():
+            break
+        if giro_idx is None and linea:
+            empresa["giro"] = linea
+            giro_idx = j
+        elif giro_idx is not None and j == giro_idx + 1:
+            # Dirección = línea siguiente al giro
+            empresa["direccion"] = linea
+        elif giro_idx is not None and j == giro_idx + 2:
+            # Comuna = línea siguiente a la dirección
+            empresa["comuna"] = linea
+            break
+
 
 
 # ---------------------------------------------------------------------------
