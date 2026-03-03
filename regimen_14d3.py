@@ -62,12 +62,22 @@ class ResultadoRLI:
 # Cuentas por defecto del régimen
 # ---------------------------------------------------------------------------
 CUENTAS_INGRESOS_DEFAULT = [
-    {"codigo": "300101", "nombre": "Ingresos Del Giro Percibido", "signo": "+", "f22": "1600"},
-    {"codigo": "311102", "nombre": "Reajuste",                     "signo": "+", "f22": "1588"},
+    # Ingresos del Giro Percibidos (grupo compuesto)
+    {"codigo": "300101",    "nombre": "Venta",                                       "signo": "+", "f22": ""},
+    {"codigo": "300102",    "nombre": "Servicio",                                    "signo": "+", "f22": ""},
+    {"codigo": "IGP_VANT",  "nombre": "Ventas del Año Anterior Pagadas en este año", "signo": "+", "f22": "", "manual_fijo": True},
+    {"codigo": "IGP_VPEND", "nombre": "Ventas Pendientes de pago al 31-12",          "signo": "-", "f22": "", "manual_fijo": True},
+    # fin grupo ingresos del giro → f22 1400
+    {"codigo": "311102",    "nombre": "Reajuste",                                    "signo": "+", "f22": "1588"},
 ]
 
 CUENTAS_EGRESOS_DEFAULT = [
-    {"codigo": "400101", "nombre": "Compras netas existencias",         "signo": "+", "f22": "1409"},
+    # Existencias, Insumos y Servicios del Negocio, Pagados (grupo compuesto)
+    {"codigo": "400101",    "nombre": "Costo de Ventas",                  "signo": "+", "f22": ""},
+    {"codigo": "EGR_CVANT", "nombre": "Costo de ventas del año anterior",  "signo": "+", "f22": "", "manual_fijo": True},
+    {"codigo": "EGR_IMPTR", "nombre": "Importaciones en tránsito",         "signo": "+", "f22": "", "manual_fijo": True},
+    {"codigo": "202101",    "nombre": "Proveedores",                      "signo": "-", "f22": "", "col": "pasivos"},
+    # fin grupo existencias → f22 1409
     # Remuneraciones (grupo compuesto)
     {"codigo": "410101", "nombre": "Remuneraciones imponibles",         "signo": "+", "f22": ""},
     {"codigo": "410102", "nombre": "Leyes sociales",                    "signo": "+", "f22": ""},
@@ -85,6 +95,12 @@ CUENTAS_GASTOS_RECHAZADOS_DEFAULT = [
     {"codigo": "430102", "nombre": "Multas e Intereses",            "signo": "+", "f22": "1431"},
 ]
 
+# Grupo ingresos del giro (subcuentas que se suman/restan)
+CODIGOS_INGRESOS_GIRO = {"300101", "300102", "IGP_VANT", "IGP_VPEND"}
+
+# Grupo existencias (subcuentas que se suman/restan)
+CODIGOS_EXISTENCIAS = {"400101", "EGR_CVANT", "EGR_IMPTR", "202101"}
+
 # Grupo remuneraciones (subcuentas que se suman)
 CODIGOS_REMUNERACIONES = {"410101", "410102", "410110", "410111"}
 
@@ -98,15 +114,27 @@ def construir_lineas_ingresos(cuentas_balance: dict, extras: list[dict] = None) 
 
     lineas = []
     for d in CUENTAS_INGRESOS_DEFAULT:
-        monto = get_valor(cuentas_balance, d["codigo"], "ganancias")
-        lineas.append(CuentaLinea(
-            codigo=d["codigo"],
-            nombre=get_nombre(cuentas_balance, d["codigo"]) or d["nombre"],
-            monto=monto,
-            signo=d["signo"],
-            f22=d["f22"],
-            existe_en_balance=existe_cuenta(cuentas_balance, d["codigo"]),
-        ))
+        if d.get("manual_fijo"):
+            # Cuenta manual fija — no se extrae del balance, monto editable
+            lineas.append(CuentaLinea(
+                codigo=d["codigo"],
+                nombre=d["nombre"],
+                monto=0,
+                signo=d["signo"],
+                f22=d["f22"],
+                es_manual=True,
+                existe_en_balance=True,  # no mostrar warning
+            ))
+        else:
+            monto = get_valor(cuentas_balance, d["codigo"], "ganancias")
+            lineas.append(CuentaLinea(
+                codigo=d["codigo"],
+                nombre=get_nombre(cuentas_balance, d["codigo"]) or d["nombre"],
+                monto=monto,
+                signo=d["signo"],
+                f22=d["f22"],
+                existe_en_balance=existe_cuenta(cuentas_balance, d["codigo"]),
+            ))
     for e in (extras or []):
         monto = get_valor(cuentas_balance, e["codigo"], "ganancias") if not e.get("es_manual") else e["monto"]
         lineas.append(CuentaLinea(
@@ -127,17 +155,29 @@ def construir_lineas_egresos(cuentas_balance: dict, extras: list[dict] = None) -
 
     lineas = []
     for d in CUENTAS_EGRESOS_DEFAULT:
-        # Para remuneraciones, la columna es perdidas
-        col = "activos" if d["codigo"] == "101090" else "perdidas"
-        monto = get_valor(cuentas_balance, d["codigo"], col)
-        lineas.append(CuentaLinea(
-            codigo=d["codigo"],
-            nombre=get_nombre(cuentas_balance, d["codigo"]) or d["nombre"],
-            monto=monto,
-            signo=d["signo"],
-            f22=d["f22"],
-            existe_en_balance=existe_cuenta(cuentas_balance, d["codigo"]),
-        ))
+        if d.get("manual_fijo"):
+            # Cuenta manual fija — no se extrae del balance, monto editable
+            lineas.append(CuentaLinea(
+                codigo=d["codigo"],
+                nombre=d["nombre"],
+                monto=0,
+                signo=d["signo"],
+                f22=d["f22"],
+                es_manual=True,
+                existe_en_balance=True,
+            ))
+        else:
+            # Determinar columna del balance según la cuenta
+            col = d.get("col", "activos" if d["codigo"] == "101090" else "perdidas")
+            monto = get_valor(cuentas_balance, d["codigo"], col)
+            lineas.append(CuentaLinea(
+                codigo=d["codigo"],
+                nombre=get_nombre(cuentas_balance, d["codigo"]) or d["nombre"],
+                monto=monto,
+                signo=d["signo"],
+                f22=d["f22"],
+                existe_en_balance=existe_cuenta(cuentas_balance, d["codigo"]),
+            ))
     for e in (extras or []):
         monto = get_valor(cuentas_balance, e["codigo"], "perdidas") if not e.get("es_manual") else e["monto"]
         lineas.append(CuentaLinea(
