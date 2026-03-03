@@ -24,12 +24,15 @@ from regimen_14d3 import (
     calcular_sin_incentivo,
     calcular_con_incentivo,
     CODIGOS_REMUNERACIONES,
+    CODIGOS_INGRESOS_GIRO,
+    CODIGOS_EXISTENCIAS,
     CUENTAS_EGRESOS_DEFAULT,
     fmt_monto,
     UF_DEFECTO,
     TASA_IDPC,
 )
 from regimen_14a import render_14a_placeholder
+from export_pdf import render_export_btn
 
 # ---------------------------------------------------------------------------
 # Config página
@@ -58,6 +61,12 @@ def _init_state():
         "extras_egresos": [],
         "extras_gastos": [],
         "extras_remuneraciones": [],
+        "extras_ingresos_giro": [],
+        "extras_existencias_suma": [],
+        "extras_existencias_resta": [],
+        "eliminadas_egr": [],
+        "eliminadas_gst": [],
+        "eliminadas_calc": [],
         "modo_calculo": "sin",          # "sin" | "con"
         "valor_uf": 38000,              # valor $ por UF (editable)
         "uf_cantidad": UF_DEFECTO,
@@ -355,6 +364,10 @@ def render_ingresos(cuentas: dict):
     st.markdown('<div class="seccion-bloque">', unsafe_allow_html=True)
     st.markdown('<div class="seccion-titulo">I. INGRESOS DEL EJERCICIO</div>', unsafe_allow_html=True)
 
+    # Inicializar lista de extras_ingresos_giro si no existe
+    if "extras_ingresos_giro" not in st.session_state:
+        st.session_state["extras_ingresos_giro"] = []
+
     lineas = construir_lineas_ingresos(cuentas, st.session_state["extras_ingresos"])
 
     # Encabezados tabla
@@ -372,55 +385,199 @@ def render_ingresos(cuentas: dict):
 
     total = 0
     idxs_a_eliminar = []
+    elim_ing = set(st.session_state.get("eliminadas_ing", []))
 
-    for i, linea in enumerate(lineas):
-        col_cod, col_nombre, col_monto, col_signo, col_f22, col_acc = st.columns(
-            [1.2, 4, 2, 0.6, 1, 1]
-        )
-        col_cod.markdown(f"<span class='cod'>{linea.codigo}</span>", unsafe_allow_html=True)
+    # Vamos a iterar con while para poder agrupar ingresos del giro
+    i = 0
+    n = len(lineas)
 
-        nombre_display = linea.nombre
-        if not linea.existe_en_balance:
-            nombre_display += " ⚠️"
-        col_nombre.markdown(nombre_display)
+    while i < n:
+        linea = lineas[i]
 
-        key_m = _monto_editable_key(linea.codigo + str(i), "ing")
-        
-        if not linea.es_manual:
-            # TEXTO PLANO
-            monto_val = linea.monto
-            col_monto.markdown(f"**{fmt_monto(monto_val)}**", unsafe_allow_html=True)
-            st.session_state["montos_editados"][key_m] = monto_val
-            nuevo_monto = monto_val
+        # Detectar inicio de bloque ingresos del giro
+        if linea.codigo in CODIGOS_INGRESOS_GIRO:
+            # Agrupar todas las líneas consecutivas que sean de ingresos del giro
+            grupo_giro = []
+            while i < n and lineas[i].codigo in CODIGOS_INGRESOS_GIRO:
+                grupo_giro.append((i, lineas[i]))
+                i += 1
+
+            # --- Pre-calcular total para mostrarlo ARRIBA ---
+            total_giro_display = 0
+
+            # 1. Sumar/restar fijos según signo (manuales leen del widget state)
+            for idx_orig, l_giro in grupo_giro:
+                if l_giro.codigo in elim_ing:
+                    continue
+                if l_giro.es_manual:
+                    key_m = _monto_editable_key(l_giro.codigo + str(idx_orig), "ing")
+                    if key_m in st.session_state:
+                        val = st.session_state[key_m]
+                    else:
+                        val = st.session_state["montos_editados"].get(key_m, l_giro.monto)
+                else:
+                    val = int(l_giro.monto)
+                if l_giro.signo == "-":
+                    total_giro_display -= int(val)
+                else:
+                    total_giro_display += int(val)
+
+            # 2. Sumar extras (Manuales => Usar widget o valor guardado)
+            for j, extra_giro in enumerate(st.session_state["extras_ingresos_giro"]):
+                key_giro = _monto_editable_key(extra_giro["codigo"] + f"igiro{j}", "igiro")
+                if key_giro in st.session_state:
+                    val = st.session_state[key_giro]
+                else:
+                    val = st.session_state["montos_editados"].get(key_giro, extra_giro["monto"])
+                total_giro_display += int(val)
+
+            # --- Renderizar Resumen Ingresos del Giro (ARRIBA) ---
+            total += total_giro_display
+
+            cg1, cg2, cg3, cg4, cg5, cg6 = st.columns([1.2, 4, 2, 0.6, 1, 1])
+            cg1.markdown("")
+            cg2.markdown("<strong>Ingresos del Giro Percibidos (Total)</strong>", unsafe_allow_html=True)
+            cg3.markdown(f"<strong>{fmt_monto(total_giro_display)}</strong>", unsafe_allow_html=True)
+            cg4.markdown("<div class='signo'>+</div>", unsafe_allow_html=True)
+            cg5.markdown(_badge_f22("1400"), unsafe_allow_html=True)
+
+            # --- Renderizar bloque colapsable indentado ---
+            _col_indent, col_expander = st.columns([0.15, 9.85])
+            with col_expander:
+                st.markdown(
+                    "<div style='border-left: 3px solid #CBD5E0; padding-left: 10px; margin-top:-16px; margin-bottom:4px;'>",
+                    unsafe_allow_html=True
+                )
+                with st.expander("📝 Ver detalle Ingresos del Giro", expanded=False):
+                    # 1. Cuentas fijas del grupo
+                    for idx_orig, l_giro in grupo_giro:
+                        if l_giro.codigo in elim_ing:
+                            continue
+                        col_cod_r, col_nom_r, col_monto_r, col_sig_r, col_f22_r, col_acc_r = st.columns(
+                            [1.2, 4, 2, 0.6, 1, 1]
+                        )
+                        col_cod_r.markdown(f"<span class='cod'>{l_giro.codigo}</span>", unsafe_allow_html=True)
+
+                        nom = l_giro.nombre
+                        if not l_giro.existe_en_balance:
+                            nom += " ⚠️"
+                        col_nom_r.markdown(nom)
+
+                        key_m = _monto_editable_key(l_giro.codigo + str(idx_orig), "ing")
+
+                        if l_giro.es_manual:
+                            # Cuenta manual fija — monto editable
+                            monto_val = st.session_state["montos_editados"].get(key_m, l_giro.monto)
+                            nuevo_monto = col_monto_r.number_input(
+                                "", value=monto_val, min_value=0, step=1000,
+                                key=key_m, label_visibility="collapsed"
+                            )
+                            st.session_state["montos_editados"][key_m] = nuevo_monto
+                        else:
+                            # Cuenta del balance — texto plano
+                            monto_val = l_giro.monto
+                            col_monto_r.markdown(f"**{fmt_monto(monto_val)}**", unsafe_allow_html=True)
+                            st.session_state["montos_editados"][key_m] = monto_val
+
+                        # Mostrar signo
+                        col_sig_r.markdown(f"<div class='signo'>{l_giro.signo}</div>", unsafe_allow_html=True)
+
+                        # Botón eliminar para cuentas extraídas
+                        if not l_giro.es_manual:
+                            if col_acc_r.button("🗑️", key=f"del_ingfijo_{l_giro.codigo}"):
+                                st.session_state.setdefault("eliminadas_ing", []).append(l_giro.codigo)
+                                st.rerun()
+
+                    # 2. Extras de ingresos del giro
+                    for j, extra_giro in enumerate(st.session_state["extras_ingresos_giro"]):
+                        key_giro = _monto_editable_key(extra_giro["codigo"] + f"igiro{j}", "igiro")
+                        monto_giro_val = st.session_state["montos_editados"].get(
+                            key_giro, extra_giro["monto"]
+                        )
+
+                        cr1, cr2, col_m_extra, cr4, cr5, cr6 = st.columns([1.2, 4, 2, 0.6, 1, 1])
+
+                        cr1.markdown(f"<span class='cod'>{extra_giro['codigo']}</span>",
+                                     unsafe_allow_html=True)
+                        cr2.markdown(extra_giro["nombre"])
+
+                        monto_giro_nuevo = col_m_extra.number_input(
+                            "", value=monto_giro_val, min_value=0, step=1000,
+                            key=key_giro, label_visibility="collapsed"
+                        )
+                        st.session_state["montos_editados"][key_giro] = monto_giro_nuevo
+
+                        if cr6.button("🗑️", key=f"del_igiro_{j}"):
+                            st.session_state["extras_ingresos_giro"].pop(j)
+                            st.rerun()
+
+                    # Botón agregar subcuenta DENTRO del expander
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("###### Agregar subcuenta a Ingresos del Giro")
+                    _render_agregar_cuenta(cuentas, "igiro", "extras_ingresos_giro")
+
+                st.markdown("</div>", unsafe_allow_html=True)
+
         else:
-            # INPUT EDITABLE
-            monto_val = st.session_state["montos_editados"].get(key_m, linea.monto)
-            nuevo_monto = col_monto.number_input(
-                "", value=monto_val, min_value=0, step=1000, key=key_m, label_visibility="collapsed"
+            # Cuenta eliminada → saltar
+            if linea.codigo in elim_ing:
+                i += 1
+                continue
+
+            # Renderizado normal de otras cuentas
+            col_cod_r, col_nom_r, col_monto_r, col_sig_r, col_f22_r, col_acc_r = st.columns(
+                [1.2, 4, 2, 0.6, 1, 1]
             )
-            st.session_state["montos_editados"][key_m] = nuevo_monto
-        
-        total += nuevo_monto
+            col_cod_r.markdown(f"<span class='cod'>{linea.codigo}</span>", unsafe_allow_html=True)
 
-        col_signo.markdown(f"<div class='signo'>{linea.signo}</div>", unsafe_allow_html=True)
-        col_f22.markdown(_badge_f22(linea.f22), unsafe_allow_html=True)
+            nombre_display = linea.nombre + (" ⚠️" if not linea.existe_en_balance else "")
+            col_nom_r.markdown(nombre_display)
 
-        if linea.es_manual:
-            if col_acc.button("🗑️", key=f"del_ing_{i}", help="Eliminar cuenta"):
-                idxs_a_eliminar.append(i)
+            key_m = _monto_editable_key(linea.codigo + str(i), "ing")
 
-    # Eliminar extras marcados
-    offset = len(construir_lineas_ingresos(cuentas))  # líneas fijas
+            if not linea.es_manual:
+                monto_val = linea.monto
+                col_monto_r.markdown(f"**{fmt_monto(monto_val)}**", unsafe_allow_html=True)
+                st.session_state["montos_editados"][key_m] = monto_val
+                nuevo_monto = monto_val
+            else:
+                monto_val = st.session_state["montos_editados"].get(key_m, linea.monto)
+                nuevo_monto = col_monto_r.number_input(
+                    "", value=monto_val, min_value=0, step=1000, key=key_m, label_visibility="collapsed"
+                )
+                st.session_state["montos_editados"][key_m] = nuevo_monto
+
+            total += nuevo_monto
+
+            col_sig_r.markdown("<div class='signo'>+</div>", unsafe_allow_html=True)
+            col_f22_r.markdown(_badge_f22(linea.f22), unsafe_allow_html=True)
+
+            # Botón eliminar — para extraídas y manuales
+            if linea.es_manual:
+                if col_acc_r.button("🗑️", key=f"del_ing_{i}", help="Eliminar"):
+                    idxs_a_eliminar.append(i)
+            else:
+                if col_acc_r.button("🗑️", key=f"del_ingfijo_{linea.codigo}", help="Eliminar"):
+                    st.session_state.setdefault("eliminadas_ing", []).append(linea.codigo)
+                    st.rerun()
+
+            i += 1
+
+    # Eliminar extras de ingresos
+    from regimen_14d3 import CUENTAS_INGRESOS_DEFAULT
+    num_defaults_ing = len(CUENTAS_INGRESOS_DEFAULT)
+
     for idx in sorted(set(idxs_a_eliminar), reverse=True):
-        extra_idx = idx - offset
-        if 0 <= extra_idx < len(st.session_state["extras_ingresos"]):
-            st.session_state["extras_ingresos"].pop(extra_idx)
-            st.rerun()
+        if idx >= num_defaults_ing:
+            extra_idx = idx - num_defaults_ing
+            if 0 <= extra_idx < len(st.session_state["extras_ingresos"]):
+                st.session_state["extras_ingresos"].pop(extra_idx)
+                st.rerun()
 
     st.markdown("<hr class='sep'>", unsafe_allow_html=True)
 
     # Agregar cuenta — selector inteligente
-    with st.expander("➕ Agregar cuenta a Ingresos"):
+    with st.expander("➕ Agregar otra cuenta a Ingresos"):
         _render_agregar_cuenta(cuentas, "ing", "extras_ingresos")
 
     # Total
@@ -440,9 +597,13 @@ def render_egresos(cuentas: dict):
     st.markdown('<div class="seccion-bloque">', unsafe_allow_html=True)
     st.markdown('<div class="seccion-titulo">II. EGRESOS DEL EJERCICIO</div>', unsafe_allow_html=True)
 
-    # Inicializar lista de extras_remuneraciones si no existe
+    # Inicializar listas extras si no existen
     if "extras_remuneraciones" not in st.session_state:
         st.session_state["extras_remuneraciones"] = []
+    if "extras_existencias_suma" not in st.session_state:
+        st.session_state["extras_existencias_suma"] = []
+    if "extras_existencias_resta" not in st.session_state:
+        st.session_state["extras_existencias_resta"] = []
 
     lineas = construir_lineas_egresos(cuentas, st.session_state["extras_egresos"])
 
@@ -458,31 +619,171 @@ def render_egresos(cuentas: dict):
 
     total = 0
     idxs_eliminar = []
+    elim_egr = set(st.session_state.get("eliminadas_egr", []))
     
-    # Vamos a iterar usando while para poder agrupar remuneraciones
+    # Vamos a iterar usando while para poder agrupar existencias y remuneraciones
     i = 0
     n = len(lineas)
     
     while i < n:
         linea = lineas[i]
+
+        # ================================================================
+        # Detectar inicio de bloque EXISTENCIAS
+        # ================================================================
+        if linea.codigo in CODIGOS_EXISTENCIAS:
+            grupo_exist = []
+            while i < n and lineas[i].codigo in CODIGOS_EXISTENCIAS:
+                grupo_exist.append((i, lineas[i]))
+                i += 1
+
+            # --- Pre-calcular total (excluyendo eliminadas) ---
+            total_exist_display = 0
+
+            for idx_orig, l_ex in grupo_exist:
+                if l_ex.codigo in elim_egr:
+                    continue
+                if l_ex.es_manual:
+                    key_m = _monto_editable_key(l_ex.codigo + str(idx_orig), "egr")
+                    if key_m in st.session_state:
+                        val = st.session_state[key_m]
+                    else:
+                        val = st.session_state["montos_editados"].get(key_m, l_ex.monto)
+                else:
+                    val = int(l_ex.monto)
+                if l_ex.signo == "-":
+                    total_exist_display -= int(val)
+                else:
+                    total_exist_display += int(val)
+
+            for j, extra_s in enumerate(st.session_state["extras_existencias_suma"]):
+                key_es = _monto_editable_key(extra_s["codigo"] + f"exs{j}", "exs")
+                if key_es in st.session_state:
+                    val = st.session_state[key_es]
+                else:
+                    val = st.session_state["montos_editados"].get(key_es, extra_s["monto"])
+                total_exist_display += int(val)
+
+            for j, extra_r in enumerate(st.session_state["extras_existencias_resta"]):
+                key_er = _monto_editable_key(extra_r["codigo"] + f"exr{j}", "exr")
+                if key_er in st.session_state:
+                    val = st.session_state[key_er]
+                else:
+                    val = st.session_state["montos_editados"].get(key_er, extra_r["monto"])
+                total_exist_display -= int(val)
+
+            # --- Renderizar Resumen Existencias (ARRIBA) ---
+            total += total_exist_display
+
+            ce1, ce2, ce3, ce4, ce5, ce6 = st.columns([1.2, 4, 2, 0.6, 1, 1])
+            ce1.markdown("")
+            ce2.markdown("<strong>Existencias, Insumos y Servicios del Negocio, Pagados (Total)</strong>", unsafe_allow_html=True)
+            ce3.markdown(f"<strong>{fmt_monto(total_exist_display)}</strong>", unsafe_allow_html=True)
+            ce4.markdown("<div class='signo'>+</div>", unsafe_allow_html=True)
+            ce5.markdown(_badge_f22("1409"), unsafe_allow_html=True)
+
+            # --- Bloque colapsable ---
+            _col_indent, col_expander = st.columns([0.15, 9.85])
+            with col_expander:
+                st.markdown(
+                    "<div style='border-left: 3px solid #CBD5E0; padding-left: 10px; margin-top:-16px; margin-bottom:4px;'>",
+                    unsafe_allow_html=True
+                )
+                with st.expander("📝 Ver detalle Existencias, Insumos y Servicios", expanded=False):
+                    for idx_orig, l_ex in grupo_exist:
+                        if l_ex.codigo in elim_egr:
+                            continue
+                        col_cod_r, col_nom_r, col_monto_r, col_sig_r, col_f22_r, col_acc_r = st.columns(
+                            [1.2, 4, 2, 0.6, 1, 1]
+                        )
+                        col_cod_r.markdown(f"<span class='cod'>{l_ex.codigo}</span>", unsafe_allow_html=True)
+                        nom = l_ex.nombre
+                        if not l_ex.existe_en_balance:
+                            nom += " ⚠️"
+                        col_nom_r.markdown(nom)
+
+                        key_m = _monto_editable_key(l_ex.codigo + str(idx_orig), "egr")
+
+                        if l_ex.es_manual:
+                            monto_val = st.session_state["montos_editados"].get(key_m, l_ex.monto)
+                            nuevo_monto = col_monto_r.number_input(
+                                "", value=monto_val, min_value=0, step=1000,
+                                key=key_m, label_visibility="collapsed"
+                            )
+                            st.session_state["montos_editados"][key_m] = nuevo_monto
+                        else:
+                            monto_val = l_ex.monto
+                            col_monto_r.markdown(f"**{fmt_monto(monto_val)}**", unsafe_allow_html=True)
+                            st.session_state["montos_editados"][key_m] = monto_val
+
+                        col_sig_r.markdown(f"<div class='signo'>{l_ex.signo}</div>", unsafe_allow_html=True)
+
+                        # Botón eliminar para cuentas extraídas
+                        if not l_ex.es_manual:
+                            if col_acc_r.button("🗑️", key=f"del_exfijo_{l_ex.codigo}"):
+                                st.session_state["eliminadas_egr"].append(l_ex.codigo)
+                                st.rerun()
+
+                    # Extras que SUMAN (+)
+                    for j, extra_s in enumerate(st.session_state["extras_existencias_suma"]):
+                        key_es = _monto_editable_key(extra_s["codigo"] + f"exs{j}", "exs")
+                        monto_es_val = st.session_state["montos_editados"].get(key_es, extra_s["monto"])
+                        cr1, cr2, col_m_extra, cr4, cr5, cr6 = st.columns([1.2, 4, 2, 0.6, 1, 1])
+                        cr1.markdown(f"<span class='cod'>{extra_s['codigo']}</span>", unsafe_allow_html=True)
+                        cr2.markdown(extra_s["nombre"])
+                        monto_es_nuevo = col_m_extra.number_input(
+                            "", value=monto_es_val, min_value=0, step=1000,
+                            key=key_es, label_visibility="collapsed"
+                        )
+                        st.session_state["montos_editados"][key_es] = monto_es_nuevo
+                        cr4.markdown("<div class='signo'>+</div>", unsafe_allow_html=True)
+                        if cr6.button("🗑️", key=f"del_exs_{j}"):
+                            st.session_state["extras_existencias_suma"].pop(j)
+                            st.rerun()
+
+                    # Extras que RESTAN (-)
+                    for j, extra_r in enumerate(st.session_state["extras_existencias_resta"]):
+                        key_er = _monto_editable_key(extra_r["codigo"] + f"exr{j}", "exr")
+                        monto_er_val = st.session_state["montos_editados"].get(key_er, extra_r["monto"])
+                        cr1, cr2, col_m_extra, cr4, cr5, cr6 = st.columns([1.2, 4, 2, 0.6, 1, 1])
+                        cr1.markdown(f"<span class='cod'>{extra_r['codigo']}</span>", unsafe_allow_html=True)
+                        cr2.markdown(extra_r["nombre"])
+                        monto_er_nuevo = col_m_extra.number_input(
+                            "", value=monto_er_val, min_value=0, step=1000,
+                            key=key_er, label_visibility="collapsed"
+                        )
+                        st.session_state["montos_editados"][key_er] = monto_er_nuevo
+                        cr4.markdown("<div class='signo'>-</div>", unsafe_allow_html=True)
+                        if cr6.button("🗑️", key=f"del_exr_{j}"):
+                            st.session_state["extras_existencias_resta"].pop(j)
+                            st.rerun()
+
+                    # Botones agregar subcuenta
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("###### ➕ Agregar subcuenta que SUMA (+)")
+                    _render_agregar_cuenta(cuentas, "exs", "extras_existencias_suma")
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("###### ➖ Agregar subcuenta que RESTA (-)")
+                    _render_agregar_cuenta(cuentas, "exr", "extras_existencias_resta")
+
+                st.markdown("</div>", unsafe_allow_html=True)
         
-        # Detectar inicio de bloque remuneraciones
-        if linea.codigo in CODIGOS_REMUNERACIONES:
-            # Agrupar todas las líneas consecutivas que sean de remuneraciones
+        # ================================================================
+        # Detectar inicio de bloque REMUNERACIONES
+        # ================================================================
+        elif linea.codigo in CODIGOS_REMUNERACIONES:
             grupo_rem = []
             while i < n and lineas[i].codigo in CODIGOS_REMUNERACIONES:
                 grupo_rem.append((i, lineas[i]))
                 i += 1
             
-            # --- Pre-calcular total para mostrarlo ARRIBA ---
+            # --- Pre-calcular total (excluyendo eliminadas) ---
             total_rem_display = 0
-            
-            # 1. Sumar fijos (Extrados => No editables => Usar valor linea.monto)
             for idx_orig, l_rem in grupo_rem:
-                # Al ser fijo/extraído, asumimos no editable
+                if l_rem.codigo in elim_egr:
+                    continue
                 total_rem_display += int(l_rem.monto)
             
-            # 2. Sumar extras (Manuales => Usar widget o valor guardado)
             for j, extra_rem in enumerate(st.session_state["extras_remuneraciones"]):
                 key_rem = _monto_editable_key(extra_rem["codigo"] + f"rem{j}", "rem")
                 if key_rem in st.session_state:
@@ -500,7 +801,6 @@ def render_egresos(cuentas: dict):
             crem3.markdown(f"<strong>{fmt_monto(total_rem_display)}</strong>", unsafe_allow_html=True)
             crem4.markdown("<div class='signo'>+</div>", unsafe_allow_html=True)
             crem5.markdown(_badge_f22("1411"), unsafe_allow_html=True)
-            
 
             # --- Renderizar bloque colapsable indentado ---
             _col_indent, col_expander = st.columns([0.15, 9.85])
@@ -510,47 +810,44 @@ def render_egresos(cuentas: dict):
                     unsafe_allow_html=True
                 )
                 with st.expander("📝 Ver detalle Remuneraciones", expanded=False):
-                    # 1. Cuentas fijas del grupo
                     for idx_orig, l_rem in grupo_rem:
+                        if l_rem.codigo in elim_egr:
+                            continue
                         col_cod_r, col_nom_r, col_monto_r, col_sig_r, col_f22_r, col_acc_r = st.columns(
                             [1.2, 4, 2, 0.6, 1, 1]
                         )
                         col_cod_r.markdown(f"<span class='cod'>{l_rem.codigo}</span>", unsafe_allow_html=True)
-                        
                         nom = l_rem.nombre
                         if not l_rem.existe_en_balance:
                             nom += " ⚠️"
                         col_nom_r.markdown(nom)
-                        
                         key_m = _monto_editable_key(l_rem.codigo + str(idx_orig), "egr")
                         monto_val = l_rem.monto
                         col_monto_r.markdown(f"**{fmt_monto(monto_val)}**", unsafe_allow_html=True)
                         st.session_state["montos_editados"][key_m] = monto_val
 
-                    # 2. Extras de remuneraciones
+                        # Botón eliminar para cuentas extraídas
+                        if col_acc_r.button("🗑️", key=f"del_remfijo_{l_rem.codigo}"):
+                            st.session_state["eliminadas_egr"].append(l_rem.codigo)
+                            st.rerun()
+
+                    # Extras de remuneraciones
                     for j, extra_rem in enumerate(st.session_state["extras_remuneraciones"]):
                         key_rem = _monto_editable_key(extra_rem["codigo"] + f"rem{j}", "rem")
-                        monto_rem_val = st.session_state["montos_editados"].get(
-                            key_rem, extra_rem["monto"]
-                        )
-                        
+                        monto_rem_val = st.session_state["montos_editados"].get(key_rem, extra_rem["monto"])
                         cr1, cr2, col_m_extra, cr4, cr5, cr6 = st.columns([1.2, 4, 2, 0.6, 1, 1])
-                        
-                        cr1.markdown(f"<span class='cod'>{extra_rem['codigo']}</span>",
-                                     unsafe_allow_html=True)
+                        cr1.markdown(f"<span class='cod'>{extra_rem['codigo']}</span>", unsafe_allow_html=True)
                         cr2.markdown(extra_rem["nombre"])
-                        
                         monto_rem_nuevo = col_m_extra.number_input(
                             "", value=monto_rem_val, min_value=0, step=1000,
                             key=key_rem, label_visibility="collapsed"
                         )
                         st.session_state["montos_editados"][key_rem] = monto_rem_nuevo
-                        
                         if cr6.button("🗑️", key=f"del_rem_{j}"):
                             st.session_state["extras_remuneraciones"].pop(j)
                             st.rerun()
 
-                    # Botón agregar subcuenta DENTRO del expander
+                    # Botón agregar subcuenta
                     st.markdown("<br>", unsafe_allow_html=True)
                     st.markdown("###### Agregar subcuenta a Remuneraciones")
                     _render_agregar_cuenta(cuentas, "rem", "extras_remuneraciones")
@@ -558,12 +855,16 @@ def render_egresos(cuentas: dict):
                 st.markdown("</div>", unsafe_allow_html=True)
 
         else:
+            # Cuenta eliminada → saltar
+            if linea.codigo in elim_egr:
+                i += 1
+                continue
+
             # Renderizado normal de otras cuentas
             col_cod_r, col_nom_r, col_monto_r, col_sig_r, col_f22_r, col_acc_r = st.columns(
                 [1.2, 4, 2, 0.6, 1, 1]
             )
             col_cod_r.markdown(f"<span class='cod'>{linea.codigo}</span>", unsafe_allow_html=True)
-            
             nombre_display = linea.nombre + (" ⚠️" if not linea.existe_en_balance else "")
             col_nom_r.markdown(nombre_display)
 
@@ -586,16 +887,18 @@ def render_egresos(cuentas: dict):
             col_sig_r.markdown("<div class='signo'>+</div>", unsafe_allow_html=True)
             col_f22_r.markdown(_badge_f22(linea.f22), unsafe_allow_html=True)
 
+            # Botón eliminar — para extraídas y manuales
             if linea.es_manual:
                 if col_acc_r.button("🗑️", key=f"del_egr_{i}", help="Eliminar"):
                     idxs_eliminar.append(i)
+            else:
+                if col_acc_r.button("🗑️", key=f"del_egrfijo_{linea.codigo}", help="Eliminar"):
+                    st.session_state["eliminadas_egr"].append(linea.codigo)
+                    st.rerun()
             
             i += 1
 
     # Eliminar extras de egresos
-    # Re-implementar borrado robusto
-    # Los extras están al final de la lista 'lineas'.
-    # Cuantos defaults hay?
     num_defaults = len(CUENTAS_EGRESOS_DEFAULT)
     
     for idx in sorted(set(idxs_eliminar), reverse=True):
@@ -641,8 +944,13 @@ def render_gastos_rechazados(cuentas: dict):
     total = 0
     idxs_eliminar = []
     lineas_fijas_len = 2
+    elim_gst = set(st.session_state.get("eliminadas_gst", []))
 
     for i, linea in enumerate(lineas):
+        # Saltar eliminadas
+        if linea.codigo in elim_gst and not linea.es_manual:
+            continue
+
         col_cod_r, col_nom_r, col_monto_r, col_sig_r, col_f22_r, col_acc_r = st.columns([1.2, 4, 2, 0.6, 1, 1])
         col_cod_r.markdown(f"<span class='cod'>{linea.codigo}</span>", unsafe_allow_html=True)
         nombre_display = linea.nombre + (" ⚠️" if not linea.existe_en_balance else "")
@@ -668,9 +976,14 @@ def render_gastos_rechazados(cuentas: dict):
         col_sig_r.markdown(f"<div class='signo'>{linea.signo}</div>", unsafe_allow_html=True)
         col_f22_r.markdown(_badge_f22(linea.f22), unsafe_allow_html=True)
 
+        # Botón eliminar — para extraídas y manuales
         if linea.es_manual:
             if col_acc_r.button("🗑️", key=f"del_gst_{i}"):
                 idxs_eliminar.append(i)
+        else:
+            if col_acc_r.button("🗑️", key=f"del_gstfijo_{linea.codigo}", help="Eliminar"):
+                st.session_state["eliminadas_gst"].append(linea.codigo)
+                st.rerun()
 
     for idx in sorted(set(idxs_eliminar), reverse=True):
         extra_idx = idx - lineas_fijas_len
@@ -712,15 +1025,23 @@ def render_calculo(cuentas: dict, total_ing: int, total_egr: int, total_gst: int
     modo = st.session_state["modo_calculo"]
 
     # PPM
+    elim_calc = set(st.session_state.get("eliminadas_calc", []))
     ppm_balance = get_valor(cuentas, "101090", "activos") or get_valor(cuentas, "105101", "activos")
     key_ppm = "monto_ppm_101090_calc"
-    ppm_val = st.session_state["montos_editados"].get(key_ppm, ppm_balance)
 
-    col_ppm1, col_ppm2 = st.columns([3, 2])
-    col_ppm1.markdown("**101090 — PPM (Pagos Provisionales Mensuales)**")
-    ppm_editado = col_ppm2.number_input("PPM $", value=ppm_val, min_value=0, step=1000,
-                                        key=key_ppm, label_visibility="collapsed")
-    st.session_state["montos_editados"][key_ppm] = ppm_editado
+    if "101090" not in elim_calc:
+        ppm_val = ppm_balance
+        st.session_state["montos_editados"][key_ppm] = ppm_val
+        col_ppm1, col_ppm2, col_ppm3 = st.columns([3, 2, 1])
+        col_ppm1.markdown("**101090 — PPM (Pagos Provisionales Mensuales)**")
+        col_ppm2.markdown(f"**{fmt_monto(ppm_val)}**")
+        if col_ppm3.button("🗑️", key="del_calc_ppm", help="Eliminar"):
+            st.session_state["eliminadas_calc"].append("101090")
+            st.rerun()
+        ppm_editado = ppm_val
+    else:
+        ppm_editado = 0
+        st.session_state["montos_editados"][key_ppm] = 0
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -755,7 +1076,7 @@ def _render_sin_incentivo(total_ing, total_egr, total_gst, ppm):
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    _render_export_btn(resultado, modo="sin")
+    render_export_btn(resultado, modo="sin")
 
 
 def _render_con_incentivo(cuentas, total_ing, total_egr, total_gst, ppm):
@@ -779,35 +1100,55 @@ def _render_con_incentivo(cuentas, total_ing, total_egr, total_gst, ppm):
     st.session_state["uf_cantidad"] = uf_cant
     uf_pesos = int(uf_cant * valor_uf)
 
+    elim_calc = set(st.session_state.get("eliminadas_calc", []))
+
     # Retiros
     retiros_balance = get_valor(cuentas, "101120", "activos")
     key_ret = "monto_retiros_101120"
-    ret_val = st.session_state["montos_editados"].get(key_ret, retiros_balance)
-    col_r1, col_r2 = st.columns([3, 2])
-    col_r1.markdown("**101120 — Retiros del Ejercicio (históricos)**")
-    ret_editado = col_r2.number_input("Retiros $", value=ret_val, min_value=0, step=1000,
-                                      key=key_ret, label_visibility="collapsed")
-    st.session_state["montos_editados"][key_ret] = ret_editado
+    if "101120" not in elim_calc:
+        ret_editado = retiros_balance
+        st.session_state["montos_editados"][key_ret] = ret_editado
+        col_r1, col_r2, col_r3 = st.columns([3, 2, 1])
+        col_r1.markdown("**101120 — Retiros del Ejercicio (históricos)**")
+        col_r2.markdown(f"**{fmt_monto(ret_editado)}**")
+        if col_r3.button("🗑️", key="del_calc_retiros", help="Eliminar"):
+            st.session_state["eliminadas_calc"].append("101120")
+            st.rerun()
+    else:
+        ret_editado = 0
+        st.session_state["montos_editados"][key_ret] = 0
 
     # Multas históricas
     multas_bal = get_valor(cuentas, "430102", "perdidas")
     key_mul = "monto_multas_hist_430102"
-    mul_val = st.session_state["montos_editados"].get(key_mul, multas_bal)
-    col_m1, col_m2 = st.columns([3, 2])
-    col_m1.markdown("**430102 — Multas e Intereses (históricos)**")
-    mul_editado = col_m2.number_input("Multas $", value=mul_val, min_value=0, step=100,
-                                      key=key_mul, label_visibility="collapsed")
-    st.session_state["montos_editados"][key_mul] = mul_editado
+    if "430102_calc" not in elim_calc:
+        mul_editado = multas_bal
+        st.session_state["montos_editados"][key_mul] = mul_editado
+        col_m1, col_m2, col_m3 = st.columns([3, 2, 1])
+        col_m1.markdown("**430102 — Multas e Intereses (históricos)**")
+        col_m2.markdown(f"**{fmt_monto(mul_editado)}**")
+        if col_m3.button("🗑️", key="del_calc_multas", help="Eliminar"):
+            st.session_state["eliminadas_calc"].append("430102_calc")
+            st.rerun()
+    else:
+        mul_editado = 0
+        st.session_state["montos_editados"][key_mul] = 0
 
     # IDPC histórico
     idpc_bal = get_valor(cuentas, "430101", "perdidas")
     key_idpc = "monto_idpc_hist_430101"
-    idpc_val = st.session_state["montos_editados"].get(key_idpc, idpc_bal)
-    col_i1, col_i2 = st.columns([3, 2])
-    col_i1.markdown("**430101 — Pago del IDPC (histórico)**")
-    idpc_editado = col_i2.number_input("IDPC hist $", value=idpc_val, min_value=0, step=1000,
-                                       key=key_idpc, label_visibility="collapsed")
-    st.session_state["montos_editados"][key_idpc] = idpc_editado
+    if "430101_calc" not in elim_calc:
+        idpc_editado = idpc_bal
+        st.session_state["montos_editados"][key_idpc] = idpc_editado
+        col_i1, col_i2, col_i3 = st.columns([3, 2, 1])
+        col_i1.markdown("**430101 — Pago del IDPC (histórico)**")
+        col_i2.markdown(f"**{fmt_monto(idpc_editado)}**")
+        if col_i3.button("🗑️", key="del_calc_idpc", help="Eliminar"):
+            st.session_state["eliminadas_calc"].append("430101_calc")
+            st.rerun()
+    else:
+        idpc_editado = 0
+        st.session_state["montos_editados"][key_idpc] = 0
 
     st.markdown("<hr class='sep'>", unsafe_allow_html=True)
 
@@ -849,7 +1190,7 @@ def _render_con_incentivo(cuentas, total_ing, total_egr, total_gst, ppm):
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    _render_export_btn(resultado, modo="con")
+    render_export_btn(resultado, modo="con")
 
 
 def _fila_resultado(label: str, valor: int, signo: str, f22: str,
@@ -868,238 +1209,6 @@ def _fila_resultado(label: str, valor: int, signo: str, f22: str,
     col4.markdown(_badge_f22(f22), unsafe_allow_html=True)
 
 
-# ---------------------------------------------------------------------------
-# Exportar a PDF
-# ---------------------------------------------------------------------------
-def _render_export_btn(resultado, modo: str):
-    st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("📄 Exportar cálculo a PDF", key=f"export_pdf_{modo}", type="primary"):
-        pdf_bytes = _generar_pdf(resultado, modo)
-        st.download_button(
-            label="⬇️ Descargar PDF",
-            data=pdf_bytes,
-            file_name="calculo_rli_idpc.pdf",
-            mime="application/pdf",
-            key=f"dl_pdf_{modo}",
-        )
-
-
-def _generar_pdf(resultado, modo: str) -> bytes:
-    """Genera PDF con detalle completo de cuentas y resultado del cálculo."""
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import cm
-    from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=1.8*cm, rightMargin=1.8*cm,
-                            topMargin=2*cm, bottomMargin=2*cm)
-    styles = getSampleStyleSheet()
-    story = []
-
-    emp       = st.session_state.get("empresa", {})
-    cuentas   = st.session_state.get("cuentas", {})
-    montos_ed = st.session_state.get("montos_editados", {})
-
-    azul       = colors.HexColor("#2c5282")
-    azul_claro = colors.HexColor("#dbeafe")
-    gris_fila  = colors.HexColor("#f7fafc")
-    gris_linea = colors.HexColor("#e2e8f0")
-
-    h1   = ParagraphStyle("h1",   parent=styles["Heading1"], textColor=azul, fontSize=13, spaceAfter=2)
-    h2   = ParagraphStyle("h2",   parent=styles["Heading2"], textColor=azul, fontSize=10, spaceBefore=8, spaceAfter=2)
-    small= ParagraphStyle("small",parent=styles["Normal"],   fontSize=8,  textColor=colors.HexColor("#4a5568"))
-
-    # ── Encabezado empresa ──────────────────────────────────────────────────
-    story.append(Paragraph(emp.get("razon_social", ""), h1))
-    dir_full = " | ".join(filter(None, [emp.get("direccion",""), emp.get("comuna","")]))
-    story.append(Paragraph(f"RUT: {emp.get('rut','—')}  |  Giro: {emp.get('giro','—')}", small))
-    if dir_full:
-        story.append(Paragraph(f"Dirección: {dir_full}", small))
-    story.append(Paragraph(f"Período: {emp.get('periodo','—')}", small))
-    story.append(Spacer(1, 0.3*cm))
-    story.append(HRFlowable(width="100%", thickness=1, color=azul))
-    story.append(Paragraph(
-        f"Determinación RLI — Régimen 14 D N°3 | {'Sin' if modo=='sin' else 'Con'} Incentivo al Ahorro",
-        h2
-    ))
-    story.append(Spacer(1, 0.2*cm))
-
-    # ── Helper tabla de detalle ─────────────────────────────────────────────
-    COL_DET = [1.5*cm, 6.2*cm, 3*cm, 1.2*cm, 1.6*cm]
-
-    def _tabla_detalle(filas_data, total_label, total_val):
-        header = [["Código", "Cuenta", "Monto", "Sign.", "SC F22"]]
-        body   = header + filas_data + [["", total_label, fmt_monto(total_val), "(=)", ""]]
-        ts_det = TableStyle([
-            ("BACKGROUND",    (0, 0), (-1, 0), azul),
-            ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
-            ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE",      (0, 0), (-1, -1), 8),
-            ("ALIGN",         (2, 0), (-1, -1), "RIGHT"),
-            ("ALIGN",         (3, 0), (3, -1), "CENTER"),
-            ("ROWBACKGROUNDS",(0, 1), (-1, -2), [colors.white, gris_fila]),
-            ("GRID",          (0, 0), (-1, -1), 0.3, gris_linea),
-            ("TOPPADDING",    (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("BACKGROUND",    (0, -1), (-1, -1), azul_claro),
-            ("FONTNAME",      (0, -1), (-1, -1), "Helvetica-Bold"),
-        ])
-        t = Table(body, colWidths=COL_DET, repeatRows=1)
-        t.setStyle(ts_det)
-        return t
-
-    # ── I. INGRESOS ─────────────────────────────────────────────────────────
-    story.append(Paragraph("I. INGRESOS DEL EJERCICIO", h2))
-    lineas_ing = construir_lineas_ingresos(cuentas, st.session_state.get("extras_ingresos", []))
-    filas_ing = []
-    for idx, l in enumerate(lineas_ing):
-        key   = _monto_editable_key(l.codigo + str(idx), "ing")
-        monto = montos_ed.get(key, l.monto)
-        filas_ing.append([l.codigo, l.nombre, fmt_monto(monto), l.signo, l.f22])
-    story.append(_tabla_detalle(filas_ing, "TOTAL INGRESOS", resultado.total_ingresos))
-    story.append(Spacer(1, 0.35*cm))
-
-    # ── II. EGRESOS ─────────────────────────────────────────────────────────
-    story.append(Paragraph("II. EGRESOS DEL EJERCICIO", h2))
-    lineas_egr = construir_lineas_egresos(cuentas, st.session_state.get("extras_egresos", []))
-    filas_egr  = []
-    rem_bloque = []   # acumula filas de remuneraciones mientras se procesan
-    rem_total  = 0
-
-    idx_e = 0
-    while idx_e < len(lineas_egr):
-        l = lineas_egr[idx_e]
-        if l.codigo in CODIGOS_REMUNERACIONES:
-            key   = _monto_editable_key(l.codigo + str(idx_e), "egr")
-            monto = montos_ed.get(key, l.monto)
-            rem_bloque.append([f"  {l.codigo}", f"  └ {l.nombre}", fmt_monto(monto), "", ""])
-            rem_total += monto
-            idx_e += 1
-        else:
-            if rem_bloque:
-                # Añadir extras remuneraciones
-                for j2, er in enumerate(st.session_state.get("extras_remuneraciones", [])):
-                    key_r = _monto_editable_key(er["codigo"] + f"rem{j2}", "rem")
-                    mv    = montos_ed.get(key_r, er["monto"])
-                    rem_bloque.append([f"  {er['codigo']}", f"  └ {er['nombre']}", fmt_monto(mv), "", ""])
-                    rem_total += mv
-                # Fila resumen remuneraciones
-                filas_egr.append(["", "Remuneraciones Pagadas", fmt_monto(rem_total), "+", "1411"])
-                filas_egr.extend(rem_bloque)
-                rem_bloque = []
-                rem_total  = 0
-
-            key   = _monto_editable_key(l.codigo + str(idx_e), "egr")
-            monto = montos_ed.get(key, l.monto)
-            filas_egr.append([l.codigo, l.nombre, fmt_monto(monto), l.signo, l.f22])
-            idx_e += 1
-
-    # Si termina con bloque rem
-    if rem_bloque:
-        for j2, er in enumerate(st.session_state.get("extras_remuneraciones", [])):
-            key_r = _monto_editable_key(er["codigo"] + f"rem{j2}", "rem")
-            mv    = montos_ed.get(key_r, er["monto"])
-            rem_bloque.append([f"  {er['codigo']}", f"  └ {er['nombre']}", fmt_monto(mv), "", ""])
-            rem_total += mv
-        filas_egr.append(["", "Remuneraciones Pagadas", fmt_monto(rem_total), "+", "1411"])
-        filas_egr.extend(rem_bloque)
-
-    story.append(_tabla_detalle(filas_egr, "TOTAL EGRESOS", resultado.total_egresos))
-    story.append(Spacer(1, 0.35*cm))
-
-    # ── III. GASTOS RECHAZADOS ───────────────────────────────────────────────
-    story.append(Paragraph("III. GASTOS RECHAZADOS", h2))
-    lineas_gst = construir_lineas_gastos_rechazados(cuentas, st.session_state.get("extras_gastos", []))
-    filas_gst  = []
-    for idx, l in enumerate(lineas_gst):
-        key   = _monto_editable_key(l.codigo + str(idx), "gst")
-        monto = montos_ed.get(key, l.monto)
-        filas_gst.append([l.codigo, l.nombre, fmt_monto(monto), l.signo, l.f22])
-    story.append(_tabla_detalle(filas_gst, "TOTAL GASTOS RECHAZADOS", resultado.total_gastos_rechazados))
-    story.append(Spacer(1, 0.4*cm))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=gris_linea))
-    story.append(Spacer(1, 0.1*cm))
-
-    # ── IV. CÁLCULO RLI / IDPC ──────────────────────────────────────────────
-    story.append(Paragraph(
-        f"IV. CÁLCULO {'SIN' if modo=='sin' else 'CON'} INCENTIVO AL AHORRO", h2
-    ))
-
-    col_calc = [8.5*cm, 3.5*cm, 1.5*cm, 2*cm]
-
-    def fc(etiqueta, valor, signo="", f22=""):
-        return [etiqueta, fmt_monto(valor), signo, f22]
-
-    if modo == "sin":
-        data_calc = [
-            ["Concepto", "Monto", "Sign.", "SC F22"],
-            fc("Total Ingresos del Ejercicio",    resultado.total_ingresos,          "(=)", "1600"),
-            fc("Total Egresos del Ejercicio",     resultado.total_egresos,           "(-)", ""),
-            fc("Total Gastos Rechazados",         resultado.total_gastos_rechazados, "(+)", "1431"),
-            ["", "", "", ""],
-            fc("BASE IMPONIBLE",                  resultado.base_imponible,          "(=)", "1729"),
-            fc(f"IDPC Tasa {TASA_IDPC*100:.1f}%",resultado.idpc_sin_incentivo,      "(=)", "18"),
-            fc("101090 PPM",                      resultado.ppm,                     "(-)", "36"),
-            ["", "", "", ""],
-            fc("SALDO",                           resultado.saldo_sin_incentivo,     "(=)", "305"),
-        ]
-        destacadas = {5, 9}
-    else:
-        uf_pesos = st.session_state.get("valor_uf", 38000) * st.session_state.get("uf_cantidad", UF_DEFECTO)
-        uf_cant  = int(st.session_state.get("uf_cantidad", UF_DEFECTO))
-        data_calc = [
-            ["Concepto", "Monto", "Sign.", "SC F22"],
-            fc("Total Ingresos del Ejercicio",    resultado.total_ingresos,          "(=)", "1600"),
-            fc("Total Egresos del Ejercicio",     resultado.total_egresos,           "(-)", ""),
-            fc("Total Gastos Rechazados",         resultado.total_gastos_rechazados, "(+)", "1431"),
-            ["", "", "", ""],
-            fc("Sub Total Base Imponible",        resultado.sub_total_base,          "(=)", ""),
-            fc("101120 Retiros del Ejercicio",    resultado.retiros_ejercicio,       "(-)", ""),
-            fc("430102 Multas e Intereses",       resultado.multas_intereses_hist,   "(-)", ""),
-            fc("430101 Pago del IDPC",            resultado.idpc_hist,               "(-)", ""),
-            ["", "", "", ""],
-            fc("RLI INVERTIDA",                   resultado.rli_invertida,           "(=)", ""),
-            fc(
-                f"Deducción incentivo art. 14 E) LIR  "
-                f"[50% RLI = {fmt_monto(resultado.porcentaje_rli)}  |  "
-                f"Límite {uf_cant:,} UF = {fmt_monto(uf_pesos)}]",
-                resultado.deduccion_incentivo, "", "1432"
-            ),
-            ["", "", "", ""],
-            fc(f"IDPC Tasa {TASA_IDPC*100:.1f}%", resultado.idpc_con_incentivo,    "(=)", "18"),
-            fc("101090 PPM",                       resultado.ppm,                    "(-)", "36"),
-            ["", "", "", ""],
-            fc("SALDO",                            resultado.saldo_con_incentivo,    "(=)", "305"),
-        ]
-        destacadas = {5, 10, 16}
-
-    ts_calc = TableStyle([
-        ("BACKGROUND",    (0, 0), (-1, 0), azul),
-        ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
-        ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE",      (0, 0), (-1, -1), 9),
-        ("ALIGN",         (1, 0), (1, -1), "RIGHT"),
-        ("ALIGN",         (2, 0), (3, -1), "CENTER"),
-        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, gris_fila]),
-        ("GRID",          (0, 0), (-1, -1), 0.4, gris_linea),
-        ("TOPPADDING",    (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ])
-    for row_idx in destacadas:
-        if row_idx < len(data_calc):
-            ts_calc.add("FONTNAME",   (0, row_idx), (-1, row_idx), "Helvetica-Bold")
-            ts_calc.add("BACKGROUND", (0, row_idx), (-1, row_idx), azul_claro)
-            ts_calc.add("FONTSIZE",   (0, row_idx), (-1, row_idx), 10)
-
-    t_calc = Table(data_calc, colWidths=col_calc, repeatRows=1)
-    t_calc.setStyle(ts_calc)
-    story.append(t_calc)
-
-    doc.build(story)
-    return buf.getvalue()
 
 
 
