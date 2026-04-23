@@ -68,7 +68,8 @@ CUENTAS_INGRESOS_DEFAULT = [
     {"codigo": "IGP_VANT",  "nombre": "Ventas del Año Anterior Pagadas en este año", "signo": "+", "f22": "", "manual_fijo": True},
     {"codigo": "IGP_VPEND", "nombre": "Ventas Pendientes de pago al 31-12",          "signo": "-", "f22": "", "manual_fijo": True},
     # fin grupo ingresos del giro → f22 1400
-    {"codigo": "311102",    "nombre": "Reajuste",                                    "signo": "+", "f22": "1588"},
+    {"codigo": "311101",    "nombre": "Reajuste IVA Crédito Fiscal",                 "signo": "+", "f22": "1588"},
+    {"codigo": "311102",    "nombre": "Reajuste de PPM",                             "signo": "+", "f22": "1588"},
 ]
 
 CUENTAS_EGRESOS_DEFAULT = [

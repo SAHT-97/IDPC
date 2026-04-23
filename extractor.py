@@ -33,11 +33,30 @@ def _detectar_columnas_x(words: list[dict]) -> dict:
     """
     Detecta las posiciones X aproximadas de cada columna del balance
     a partir de los encabezados de la tabla.
+    Solo busca en la zona del encabezado (cerca de la palabra CODIGO)
+    para evitar confusión con nombres de cuentas como
+    'PERDIDAS ACUMULADAS' o 'CREDITOS EMPRESARIALES'.
     Retorna dict: {nombre_col: x_centro}
     """
-    header_words = [w for w in words if w["text"].upper() in
-                    ("CODIGO", "CUENTA", "DEBITOS", "CREDITOS", "DEUDOR", "ACREEDOR",
-                     "ACTIVOS", "PASIVOS", "PERDIDAS", "GANANCIAS", "SALDO")]
+    # Buscar la posición Y del encabezado (donde está CODIGO)
+    codigo_header_y = None
+    for w in words:
+        if w["text"].upper() == "CODIGO":
+            codigo_header_y = w["top"]
+            break
+
+    if codigo_header_y is None:
+        return {}
+
+    # Solo considerar palabras dentro de 25 puntos del encabezado
+    # (cubre las 2 líneas del header: SALDO / DEUDOR-ACREEDOR)
+    _HEADER_NAMES = {"CODIGO", "CUENTA", "DEBITOS", "CREDITOS", "DEUDOR",
+                     "ACREEDOR", "ACTIVOS", "PASIVOS", "PERDIDAS", "GANANCIAS", "SALDO"}
+    header_words = [
+        w for w in words
+        if abs(w["top"] - codigo_header_y) <= 25
+        and w["text"].upper() in _HEADER_NAMES
+    ]
     if not header_words:
         return {}
     cols = {}
@@ -198,13 +217,23 @@ def _extraer_cuentas_pagina(page, cuentas: dict):
         return
 
     # Agrupar palabras por línea (Y aproximado)
-    lineas_dict: dict[float, list] = {}
+    words.sort(key=lambda w: w["top"])
+    lineas_ordenadas = []
+    current_line = []
+    current_top = None
+    
     for w in words:
-        y_key = round(w["top"] / 3) * 3
-        lineas_dict.setdefault(y_key, []).append(w)
-
-    # Ordenar líneas por Y
-    lineas_ordenadas = sorted(lineas_dict.items())
+        if current_top is None:
+            current_top = w["top"]
+            current_line.append(w)
+        elif abs(w["top"] - current_top) <= 5:
+            current_line.append(w)
+        else:
+            lineas_ordenadas.append((current_top, current_line))
+            current_top = w["top"]
+            current_line = [w]
+    if current_line:
+        lineas_ordenadas.append((current_top, current_line))
 
     # Detectar columnas desde encabezados
     cols = _detectar_columnas_x(words)
@@ -240,7 +269,8 @@ def _extraer_cuentas_pagina(page, cuentas: dict):
 
         # Recoger valores numéricos con sus posiciones X
         valores_x: list[tuple[float, int]] = []
-        for w in palabras_fila:
+        for i in range(num_idx, len(palabras_fila)):
+            w = palabras_fila[i]
             if re.match(r"^[\d\.]+$", w["text"]):
                 valores_x.append(((w["x0"] + w["x1"]) / 2, _fmt_numero(w["text"])))
 

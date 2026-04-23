@@ -357,6 +357,98 @@ def _render_agregar_cuenta(cuentas: dict, prefijo: str, lista_key: str):
             st.rerun()
 
 
+def _render_agregar_cuenta_manual(prefijo: str, lista_key: str):
+    """
+    Widget para agregar una cuenta completamente manual (no del balance).
+    El usuario escribe código, nombre, monto y F22.
+    """
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_cod, col_nom, col_monto, col_f22 = st.columns([1.4, 3.2, 2, 1.4])
+
+    key_cod   = f"manual_{prefijo}_cod"
+    key_nom   = f"manual_{prefijo}_nom"
+    key_monto = f"manual_{prefijo}_monto"
+    key_f22   = f"manual_{prefijo}_f22"
+
+    col_cod.markdown("**Código**")
+    col_cod.text_input(
+        "Código de cuenta",
+        value="",
+        placeholder="ej: 410200",
+        key=key_cod,
+        label_visibility="collapsed",
+    )
+
+    col_nom.markdown("**Nombre**")
+    col_nom.text_input(
+        "Nombre cuenta",
+        value="",
+        placeholder="ej: Gastos Generales",
+        key=key_nom,
+        label_visibility="collapsed",
+    )
+
+    col_monto.markdown("**Monto ($)**")
+    col_monto.number_input(
+        "Monto",
+        value=0,
+        min_value=0,
+        step=1000,
+        key=key_monto,
+        label_visibility="collapsed",
+    )
+
+    col_f22.markdown("**SC F22** *(opcional)*")
+    col_f22.text_input(
+        "F22",
+        value="",
+        placeholder="ej: 1420",
+        key=key_f22,
+        label_visibility="collapsed",
+    )
+
+    cod_val    = st.session_state.get(key_cod, "").strip()
+    nom_val    = st.session_state.get(key_nom, "").strip()
+    monto_val  = st.session_state.get(key_monto, 0)
+    f22_val    = st.session_state.get(key_f22, "").strip()
+
+    if cod_val and nom_val:
+        st.markdown(
+            f"<div style='background:#f0fff4;border-left:3px solid #38a169;padding:6px 12px;"
+            f"border-radius:4px;font-size:12px;margin:8px 0;'>"
+            f"✔ <strong>{cod_val}</strong> — {nom_val} &nbsp;|&nbsp; "
+            f"Monto: <strong>{fmt_monto(monto_val)}</strong>"
+            f"{'&nbsp;|&nbsp; F22: <strong>' + f22_val + '</strong>' if f22_val else ''}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    if st.button("✅ Confirmar y agregar", key=f"btn_add_manual_{prefijo}", type="primary"):
+        if not cod_val:
+            st.warning("⚠️ Ingrese un código de cuenta.")
+        elif not nom_val:
+            st.warning("⚠️ Ingrese un nombre de cuenta.")
+        else:
+            lista = st.session_state[lista_key]
+            codigos_ya = [e["codigo"] for e in lista]
+            if cod_val in codigos_ya:
+                st.warning(f"⚠️ La cuenta {cod_val} ya fue agregada a esta sección.")
+            else:
+                lista.append({
+                    "codigo": cod_val,
+                    "nombre": nom_val,
+                    "signo": "+",
+                    "f22": f22_val,
+                    "monto": int(monto_val),
+                    "es_manual": True,
+                })
+                # Limpiar campos
+                for k in [key_cod, key_nom, key_monto, key_f22]:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                st.rerun()
+
+
 # ---------------------------------------------------------------------------
 # Sección I — INGRESOS
 # ---------------------------------------------------------------------------
@@ -909,9 +1001,14 @@ def render_egresos(cuentas: dict):
                 st.rerun()
     st.markdown("<hr class='sep'>", unsafe_allow_html=True)
 
-    # Agregar cuenta — selector inteligente
+    # Agregar cuenta — selector inteligente o manual
     with st.expander("➕ Agregar otra cuenta a Egresos"):
-        _render_agregar_cuenta(cuentas, "egr", "extras_egresos")
+        tab_balance, tab_manual = st.tabs(["📋 Desde el Balance", "✏️ Cuenta Manual"])
+        with tab_balance:
+            _render_agregar_cuenta(cuentas, "egr", "extras_egresos")
+        with tab_manual:
+            st.caption("Ingrese una cuenta que no esté en el balance extraído.")
+            _render_agregar_cuenta_manual("egr", "extras_egresos")
 
     # Total
     col1, col2, col3 = st.columns([5.2, 2, 1])
