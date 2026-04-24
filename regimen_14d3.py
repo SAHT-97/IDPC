@@ -5,6 +5,7 @@ Lógica tributaria completa para el Régimen 14 D N°3 (ProPyme Transparente).
 Calcula la Renta Líquida Imponible (RLI) e Impuesto de Primera Categoría (12,5%).
 """
 
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -85,8 +86,8 @@ CUENTAS_EGRESOS_DEFAULT = [
     {"codigo": "410110", "nombre": "Remuneraciones no imponibles",      "signo": "+", "f22": ""},
     {"codigo": "410111", "nombre": "Finiquitos",                        "signo": "+", "f22": ""},
     # fin grupo remuneraciones → f22 1411
-    {"codigo": "410106", "nombre": "Honorarios",                        "signo": "+", "f22": "1412"},
-    {"codigo": "410105", "nombre": "Arriendos",                         "signo": "+", "f22": "1415"},
+    {"codigo": "410106", "nombre": "Honorarios Pagados",                  "signo": "+", "f22": "1412"},
+    {"codigo": "410105", "nombre": "Arriendos Pagados",                   "signo": "+", "f22": "1415"},
     {"codigo": "430101", "nombre": "Impuesto de Primera Categoría",     "signo": "+", "f22": "1422"},
     {"codigo": "430102", "nombre": "Multas e Intereses",                "signo": "+", "f22": "1422"},
 ]
@@ -128,14 +129,15 @@ def construir_lineas_ingresos(cuentas_balance: dict, extras: list[dict] = None) 
             ))
         else:
             monto = get_valor(cuentas_balance, d["codigo"], "ganancias")
-            lineas.append(CuentaLinea(
-                codigo=d["codigo"],
-                nombre=get_nombre(cuentas_balance, d["codigo"]) or d["nombre"],
-                monto=monto,
-                signo=d["signo"],
-                f22=d["f22"],
-                existe_en_balance=existe_cuenta(cuentas_balance, d["codigo"]),
-            ))
+            if monto != 0:
+                lineas.append(CuentaLinea(
+                    codigo=d["codigo"],
+                    nombre=get_nombre(cuentas_balance, d["codigo"]) or d["nombre"],
+                    monto=monto,
+                    signo=d["signo"],
+                    f22=d["f22"],
+                    existe_en_balance=existe_cuenta(cuentas_balance, d["codigo"]),
+                ))
     for e in (extras or []):
         monto = get_valor(cuentas_balance, e["codigo"], "ganancias") if not e.get("es_manual") else e["monto"]
         lineas.append(CuentaLinea(
@@ -171,14 +173,15 @@ def construir_lineas_egresos(cuentas_balance: dict, extras: list[dict] = None) -
             # Determinar columna del balance según la cuenta
             col = d.get("col", "activos" if d["codigo"] == "101090" else "perdidas")
             monto = get_valor(cuentas_balance, d["codigo"], col)
-            lineas.append(CuentaLinea(
-                codigo=d["codigo"],
-                nombre=get_nombre(cuentas_balance, d["codigo"]) or d["nombre"],
-                monto=monto,
-                signo=d["signo"],
-                f22=d["f22"],
-                existe_en_balance=existe_cuenta(cuentas_balance, d["codigo"]),
-            ))
+            if monto != 0:
+                lineas.append(CuentaLinea(
+                    codigo=d["codigo"],
+                    nombre=get_nombre(cuentas_balance, d["codigo"]) or d["nombre"],
+                    monto=monto,
+                    signo=d["signo"],
+                    f22=d["f22"],
+                    existe_en_balance=existe_cuenta(cuentas_balance, d["codigo"]),
+                ))
     for e in (extras or []):
         monto = get_valor(cuentas_balance, e["codigo"], "perdidas") if not e.get("es_manual") else e["monto"]
         lineas.append(CuentaLinea(
@@ -200,14 +203,15 @@ def construir_lineas_gastos_rechazados(cuentas_balance: dict, extras: list[dict]
     lineas = []
     for d in CUENTAS_GASTOS_RECHAZADOS_DEFAULT:
         monto = get_valor(cuentas_balance, d["codigo"], "perdidas")
-        lineas.append(CuentaLinea(
-            codigo=d["codigo"],
-            nombre=get_nombre(cuentas_balance, d["codigo"]) or d["nombre"],
-            monto=monto,
-            signo=d["signo"],
-            f22=d["f22"],
-            existe_en_balance=existe_cuenta(cuentas_balance, d["codigo"]),
-        ))
+        if monto != 0:
+            lineas.append(CuentaLinea(
+                codigo=d["codigo"],
+                nombre=get_nombre(cuentas_balance, d["codigo"]) or d["nombre"],
+                monto=monto,
+                signo=d["signo"],
+                f22=d["f22"],
+                existe_en_balance=existe_cuenta(cuentas_balance, d["codigo"]),
+            ))
     for e in (extras or []):
         monto = get_valor(cuentas_balance, e["codigo"], "perdidas") if not e.get("es_manual") else e["monto"]
         lineas.append(CuentaLinea(
@@ -261,7 +265,7 @@ def calcular_sin_incentivo(
     r.ppm = ppm
 
     r.base_imponible = total_ingresos - total_egresos + total_gastos_rechazados
-    r.idpc_sin_incentivo = int(r.base_imponible * TASA_IDPC)
+    r.idpc_sin_incentivo = math.floor(r.base_imponible * TASA_IDPC + 0.5)
     r.saldo_sin_incentivo = r.idpc_sin_incentivo - ppm
     return r
 
@@ -298,14 +302,14 @@ def calcular_con_incentivo(
     r.sub_total_base = total_ingresos - total_egresos + total_gastos_rechazados
     r.rli_invertida = r.sub_total_base - retiros_ejercicio - multas_hist - idpc_hist
 
-    r.porcentaje_rli = int(r.rli_invertida * 0.50)
+    r.porcentaje_rli = math.floor(r.rli_invertida * 0.50 + 0.5)
     r.uf_limite = uf_valor_pesos
 
     r.deduccion_incentivo = min(r.porcentaje_rli, uf_valor_pesos)
     if r.deduccion_incentivo < 0:
         r.deduccion_incentivo = 0
 
-    r.idpc_con_incentivo = int(r.deduccion_incentivo * TASA_IDPC)
+    r.idpc_con_incentivo = math.floor(r.deduccion_incentivo * TASA_IDPC + 0.5)
     r.saldo_con_incentivo = r.idpc_con_incentivo - ppm
     return r
 

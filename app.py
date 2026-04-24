@@ -1167,8 +1167,16 @@ def _render_sin_incentivo(total_ing, total_egr, total_gst, ppm):
     _fila_resultado("101090 PPM", resultado.ppm, "(-)", "36")
     st.markdown("<hr class='sep'>", unsafe_allow_html=True)
 
-    saldo_clase = "saldo-positivo" if resultado.saldo_sin_incentivo >= 0 else "saldo-negativo"
-    _fila_resultado("SALDO", resultado.saldo_sin_incentivo, "(=)", "305",
+    if resultado.saldo_sin_incentivo < 0:
+        titulo_saldo = "Devolución"
+        val_saldo = abs(resultado.saldo_sin_incentivo)
+        saldo_clase = "saldo-negativo"
+    else:
+        titulo_saldo = "A pagar"
+        val_saldo = resultado.saldo_sin_incentivo
+        saldo_clase = "saldo-positivo"
+
+    _fila_resultado(titulo_saldo, val_saldo, "(=)", "305",
                     destacado=True, clase_extra=saldo_clase)
 
     st.markdown("</div>", unsafe_allow_html=True)
@@ -1281,8 +1289,16 @@ def _render_con_incentivo(cuentas, total_ing, total_egr, total_gst, ppm):
     _fila_resultado("101090 PPM",                    resultado.ppm,               "(-)", "36")
     st.markdown("<hr class='sep'>", unsafe_allow_html=True)
 
-    saldo_clase = "saldo-positivo" if resultado.saldo_con_incentivo >= 0 else "saldo-negativo"
-    _fila_resultado("SALDO", resultado.saldo_con_incentivo, "(=)", "305",
+    if resultado.saldo_con_incentivo < 0:
+        titulo_saldo = "Devolución"
+        val_saldo = abs(resultado.saldo_con_incentivo)
+        saldo_clase = "saldo-negativo"
+    else:
+        titulo_saldo = "A pagar"
+        val_saldo = resultado.saldo_con_incentivo
+        saldo_clase = "saldo-positivo"
+
+    _fila_resultado(titulo_saldo, val_saldo, "(=)", "305",
                     destacado=True, clase_extra=saldo_clase)
 
     st.markdown("</div>", unsafe_allow_html=True)

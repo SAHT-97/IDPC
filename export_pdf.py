@@ -38,8 +38,8 @@ def generar_pdf(resultado, modo: str) -> bytes:
     """Genera PDF con detalle completo de cuentas y resultado del cálculo, filtrando valores en cero."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=1.8*cm, rightMargin=1.8*cm,
-                            topMargin=2*cm, bottomMargin=2*cm)
+                            leftMargin=1.2*cm, rightMargin=1.2*cm,
+                            topMargin=1.2*cm, bottomMargin=1.2*cm)
     styles = getSampleStyleSheet()
     story = []
 
@@ -55,9 +55,9 @@ def generar_pdf(resultado, modo: str) -> bytes:
     gris_fila  = colors.HexColor("#f7fafc")
     gris_linea = colors.HexColor("#e2e8f0")
 
-    h1   = ParagraphStyle("h1",   parent=styles["Heading1"], textColor=azul, fontSize=13, spaceAfter=2)
-    h2   = ParagraphStyle("h2",   parent=styles["Heading2"], textColor=azul, fontSize=10, spaceBefore=8, spaceAfter=2)
-    small= ParagraphStyle("small",parent=styles["Normal"],   fontSize=8,  textColor=colors.HexColor("#4a5568"))
+    h1   = ParagraphStyle("h1",   parent=styles["Heading1"], textColor=azul, fontSize=11, spaceAfter=1)
+    h2   = ParagraphStyle("h2",   parent=styles["Heading2"], textColor=azul, fontSize=9, spaceBefore=4, spaceAfter=1)
+    small= ParagraphStyle("small",parent=styles["Normal"],   fontSize=7,  textColor=colors.HexColor("#4a5568"))
 
     # ── Encabezado empresa ──────────────────────────────────────────────────
     story.append(Paragraph(emp.get("razon_social", ""), h1))
@@ -66,13 +66,13 @@ def generar_pdf(resultado, modo: str) -> bytes:
     if dir_full:
         story.append(Paragraph(f"Dirección: {dir_full}", small))
     story.append(Paragraph(f"Período: {emp.get('periodo','—')}", small))
-    story.append(Spacer(1, 0.3*cm))
+    story.append(Spacer(1, 0.15*cm))
     story.append(HRFlowable(width="100%", thickness=1, color=azul))
     story.append(Paragraph(
         f"Determinación RLI — Régimen 14 D N°3 | {'Sin' if modo=='sin' else 'Con'} Incentivo al Ahorro",
         h2
     ))
-    story.append(Spacer(1, 0.2*cm))
+    story.append(Spacer(1, 0.1*cm))
 
     # ── Helper tabla de detalle ─────────────────────────────────────────────
     COL_DET = [1.5*cm, 6.2*cm, 3*cm, 1.2*cm, 1.6*cm]
@@ -84,13 +84,13 @@ def generar_pdf(resultado, modo: str) -> bytes:
             ("BACKGROUND",    (0, 0), (-1, 0), azul),
             ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
             ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE",      (0, 0), (-1, -1), 8),
+            ("FONTSIZE",      (0, 0), (-1, -1), 7.5),
             ("ALIGN",         (2, 0), (-1, -1), "RIGHT"),
             ("ALIGN",         (3, 0), (3, -1), "CENTER"),
             ("ROWBACKGROUNDS",(0, 1), (-1, -2), [colors.white, gris_fila]),
             ("GRID",          (0, 0), (-1, -1), 0.3, gris_linea),
-            ("TOPPADDING",    (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING",    (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
             ("BACKGROUND",    (0, -1), (-1, -1), azul_claro),
             ("FONTNAME",      (0, -1), (-1, -1), "Helvetica-Bold"),
         ])
@@ -158,7 +158,7 @@ def generar_pdf(resultado, modo: str) -> bytes:
             filas_ing.extend(giro_bloque)
 
     story.append(_tabla_detalle(filas_ing, "TOTAL INGRESOS", resultado.total_ingresos))
-    story.append(Spacer(1, 0.35*cm))
+    story.append(Spacer(1, 0.15*cm))
 
     # ── II. EGRESOS ─────────────────────────────────────────────────────────
     story.append(Paragraph("II. EGRESOS DEL EJERCICIO", h2))
@@ -287,7 +287,7 @@ def generar_pdf(resultado, modo: str) -> bytes:
             filas_egr.extend(rem_bloque)
 
     story.append(_tabla_detalle(filas_egr, "TOTAL EGRESOS", resultado.total_egresos))
-    story.append(Spacer(1, 0.35*cm))
+    story.append(Spacer(1, 0.15*cm))
 
     # ── III. GASTOS RECHAZADOS ───────────────────────────────────────────────
     story.append(Paragraph("III. GASTOS RECHAZADOS", h2))
@@ -301,9 +301,9 @@ def generar_pdf(resultado, modo: str) -> bytes:
         if monto != 0:
             filas_gst.append([l.codigo, l.nombre, fmt_monto(monto), l.signo, l.f22])
     story.append(_tabla_detalle(filas_gst, "TOTAL GASTOS RECHAZADOS", resultado.total_gastos_rechazados))
-    story.append(Spacer(1, 0.4*cm))
+    story.append(Spacer(1, 0.15*cm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=gris_linea))
-    story.append(Spacer(1, 0.1*cm))
+    story.append(Spacer(1, 0.05*cm))
 
     # ── IV. CÁLCULO RLI / IDPC ──────────────────────────────────────────────
     story.append(Paragraph(
@@ -326,7 +326,8 @@ def generar_pdf(resultado, modo: str) -> bytes:
             fc(f"IDPC Tasa {TASA_IDPC*100:.1f}%",resultado.idpc_sin_incentivo,      "(=)", "18"),
             fc("101090 PPM",                      resultado.ppm,                     "(-)", "36"),
             ["", "", "", ""],
-            fc("SALDO",                           resultado.saldo_sin_incentivo,     "(=)", "305"),
+            fc("Devolución" if resultado.saldo_sin_incentivo < 0 else "A pagar",
+               abs(resultado.saldo_sin_incentivo), "(=)", "305"),
         ]
         destacadas = {5, 9}
     else:
@@ -354,7 +355,8 @@ def generar_pdf(resultado, modo: str) -> bytes:
             fc(f"IDPC Tasa {TASA_IDPC*100:.1f}%", resultado.idpc_con_incentivo,    "(=)", "18"),
             fc("101090 PPM",                       resultado.ppm,                    "(-)", "36"),
             ["", "", "", ""],
-            fc("SALDO",                            resultado.saldo_con_incentivo,    "(=)", "305"),
+            fc("Devolución" if resultado.saldo_con_incentivo < 0 else "A pagar",
+               abs(resultado.saldo_con_incentivo), "(=)", "305"),
         ]
         destacadas = {5, 10, 16}
 
@@ -362,19 +364,19 @@ def generar_pdf(resultado, modo: str) -> bytes:
         ("BACKGROUND",    (0, 0), (-1, 0), azul),
         ("TEXTCOLOR",     (0, 0), (-1, 0), colors.white),
         ("FONTNAME",      (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE",      (0, 0), (-1, -1), 9),
+        ("FONTSIZE",      (0, 0), (-1, -1), 8),
         ("ALIGN",         (1, 0), (1, -1), "RIGHT"),
         ("ALIGN",         (2, 0), (3, -1), "CENTER"),
         ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, gris_fila]),
         ("GRID",          (0, 0), (-1, -1), 0.4, gris_linea),
-        ("TOPPADDING",    (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING",    (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ])
     for row_idx in destacadas:
         if row_idx < len(data_calc):
             ts_calc.add("FONTNAME",   (0, row_idx), (-1, row_idx), "Helvetica-Bold")
             ts_calc.add("BACKGROUND", (0, row_idx), (-1, row_idx), azul_claro)
-            ts_calc.add("FONTSIZE",   (0, row_idx), (-1, row_idx), 10)
+            ts_calc.add("FONTSIZE",   (0, row_idx), (-1, row_idx), 8.5)
 
     t_calc = Table(data_calc, colWidths=col_calc, repeatRows=1)
     t_calc.setStyle(ts_calc)
