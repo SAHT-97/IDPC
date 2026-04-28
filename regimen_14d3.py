@@ -44,6 +44,7 @@ class ResultadoRLI:
     base_imponible: int = 0
     idpc_sin_incentivo: int = 0
     ppm: int = 0
+    credito_idpc: int = 0
     saldo_sin_incentivo: int = 0
 
     # Con incentivo al ahorro
@@ -85,6 +86,7 @@ CUENTAS_EGRESOS_DEFAULT = [
     {"codigo": "410102", "nombre": "Leyes sociales",                    "signo": "+", "f22": ""},
     {"codigo": "410110", "nombre": "Remuneraciones no imponibles",      "signo": "+", "f22": ""},
     {"codigo": "410111", "nombre": "Finiquitos",                        "signo": "+", "f22": ""},
+    {"codigo": "410112", "nombre": "Indemnización",                     "signo": "+", "f22": ""},
     # fin grupo remuneraciones → f22 1411
     {"codigo": "410106", "nombre": "Honorarios Pagados",                  "signo": "+", "f22": "1412"},
     {"codigo": "410105", "nombre": "Arriendos Pagados",                   "signo": "+", "f22": "1415"},
@@ -104,7 +106,7 @@ CODIGOS_INGRESOS_GIRO = {"300101", "300102", "IGP_VANT", "IGP_VPEND"}
 CODIGOS_EXISTENCIAS = {"400101", "EGR_CVANT", "EGR_IMPTR", "202101"}
 
 # Grupo remuneraciones (subcuentas que se suman)
-CODIGOS_REMUNERACIONES = {"410101", "410102", "410110", "410111"}
+CODIGOS_REMUNERACIONES = {"410101", "410102", "410110", "410111", "410112"}
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +253,7 @@ def calcular_sin_incentivo(
     total_egresos: int,
     total_gastos_rechazados: int,
     ppm: int,
+    credito_idpc: int = 0,
 ) -> ResultadoRLI:
     """
     Fórmula:
@@ -266,7 +269,8 @@ def calcular_sin_incentivo(
 
     r.base_imponible = total_ingresos - total_egresos + total_gastos_rechazados
     r.idpc_sin_incentivo = math.floor(r.base_imponible * TASA_IDPC + 0.5)
-    r.saldo_sin_incentivo = r.idpc_sin_incentivo - ppm
+    r.credito_idpc = credito_idpc
+    r.saldo_sin_incentivo = r.idpc_sin_incentivo - ppm - credito_idpc
     return r
 
 
@@ -282,6 +286,7 @@ def calcular_con_incentivo(
     multas_hist: int,
     idpc_hist: int,
     uf_valor_pesos: int,
+    credito_idpc: int = 0,
 ) -> ResultadoRLI:
     """
     Paso 1: Sub Base = Ingresos - Egresos + Gastos Rechazados
@@ -310,7 +315,8 @@ def calcular_con_incentivo(
         r.deduccion_incentivo = 0
 
     r.idpc_con_incentivo = math.floor(r.deduccion_incentivo * TASA_IDPC + 0.5)
-    r.saldo_con_incentivo = r.idpc_con_incentivo - ppm
+    r.credito_idpc = credito_idpc
+    r.saldo_con_incentivo = r.idpc_con_incentivo - ppm - credito_idpc
     return r
 
 

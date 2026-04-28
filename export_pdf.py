@@ -325,11 +325,12 @@ def generar_pdf(resultado, modo: str) -> bytes:
             fc("BASE IMPONIBLE",                  resultado.base_imponible,          "(=)", "1729"),
             fc(f"IDPC Tasa {TASA_IDPC*100:.1f}%",resultado.idpc_sin_incentivo,      "(=)", "18"),
             fc("101090 PPM",                      resultado.ppm,                     "(-)", "36"),
+            fc("Remanente Crédito por IDPC (opcional)",                resultado.credito_idpc,            "(-)", ""),
             ["", "", "", ""],
             fc("Devolución" if resultado.saldo_sin_incentivo < 0 else "A pagar",
                abs(resultado.saldo_sin_incentivo), "(=)", "305"),
         ]
-        destacadas = {5, 9}
+        destacadas = {5, 10}
     else:
         uf_pesos = st.session_state.get("valor_uf", 38000) * st.session_state.get("uf_cantidad", UF_DEFECTO)
         uf_cant  = int(st.session_state.get("uf_cantidad", UF_DEFECTO))
@@ -340,7 +341,7 @@ def generar_pdf(resultado, modo: str) -> bytes:
             fc("Total Gastos Rechazados",         resultado.total_gastos_rechazados, "(+)", "1431"),
             ["", "", "", ""],
             fc("Sub Total Base Imponible",        resultado.sub_total_base,          "(=)", ""),
-            fc("101120 Retiros del Ejercicio",    resultado.retiros_ejercicio,       "(-)", ""),
+            fc("Retiros del Ejercicio",    resultado.retiros_ejercicio,       "(-)", ""),
             fc("430102 Multas e Intereses",       resultado.multas_intereses_hist,   "(-)", ""),
             fc("430101 Pago del IDPC",            resultado.idpc_hist,               "(-)", ""),
             ["", "", "", ""],
@@ -354,11 +355,12 @@ def generar_pdf(resultado, modo: str) -> bytes:
             ["", "", "", ""],
             fc(f"IDPC Tasa {TASA_IDPC*100:.1f}%", resultado.idpc_con_incentivo,    "(=)", "18"),
             fc("101090 PPM",                       resultado.ppm,                    "(-)", "36"),
+            fc("Remanente Crédito por IDPC (opcional)",                 resultado.credito_idpc,           "(-)", ""),
             ["", "", "", ""],
             fc("Devolución" if resultado.saldo_con_incentivo < 0 else "A pagar",
                abs(resultado.saldo_con_incentivo), "(=)", "305"),
         ]
-        destacadas = {5, 10, 16}
+        destacadas = {5, 10, 17}
 
     ts_calc = TableStyle([
         ("BACKGROUND",    (0, 0), (-1, 0), azul),

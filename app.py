@@ -360,24 +360,15 @@ def _render_agregar_cuenta(cuentas: dict, prefijo: str, lista_key: str):
 def _render_agregar_cuenta_manual(prefijo: str, lista_key: str):
     """
     Widget para agregar una cuenta completamente manual (no del balance).
-    El usuario escribe código, nombre, monto y F22.
+    El usuario escribe nombre, monto y F22 (sin código visible).
     """
+    import uuid
     st.markdown("<br>", unsafe_allow_html=True)
-    col_cod, col_nom, col_monto, col_f22 = st.columns([1.4, 3.2, 2, 1.4])
+    col_nom, col_monto, col_f22 = st.columns([4.6, 2, 1.4])
 
-    key_cod   = f"manual_{prefijo}_cod"
     key_nom   = f"manual_{prefijo}_nom"
     key_monto = f"manual_{prefijo}_monto"
     key_f22   = f"manual_{prefijo}_f22"
-
-    col_cod.markdown("**Código**")
-    col_cod.text_input(
-        "Código de cuenta",
-        value="",
-        placeholder="ej: 410200",
-        key=key_cod,
-        label_visibility="collapsed",
-    )
 
     col_nom.markdown("**Nombre**")
     col_nom.text_input(
@@ -407,16 +398,15 @@ def _render_agregar_cuenta_manual(prefijo: str, lista_key: str):
         label_visibility="collapsed",
     )
 
-    cod_val    = st.session_state.get(key_cod, "").strip()
     nom_val    = st.session_state.get(key_nom, "").strip()
     monto_val  = st.session_state.get(key_monto, 0)
     f22_val    = st.session_state.get(key_f22, "").strip()
 
-    if cod_val and nom_val:
+    if nom_val:
         st.markdown(
             f"<div style='background:#f0fff4;border-left:3px solid #38a169;padding:6px 12px;"
             f"border-radius:4px;font-size:12px;margin:8px 0;'>"
-            f"✔ <strong>{cod_val}</strong> — {nom_val} &nbsp;|&nbsp; "
+            f"✔ {nom_val} &nbsp;|&nbsp; "
             f"Monto: <strong>{fmt_monto(monto_val)}</strong>"
             f"{'&nbsp;|&nbsp; F22: <strong>' + f22_val + '</strong>' if f22_val else ''}"
             f"</div>",
@@ -424,29 +414,24 @@ def _render_agregar_cuenta_manual(prefijo: str, lista_key: str):
         )
 
     if st.button("✅ Confirmar y agregar", key=f"btn_add_manual_{prefijo}", type="primary"):
-        if not cod_val:
-            st.warning("⚠️ Ingrese un código de cuenta.")
-        elif not nom_val:
+        if not nom_val:
             st.warning("⚠️ Ingrese un nombre de cuenta.")
         else:
             lista = st.session_state[lista_key]
-            codigos_ya = [e["codigo"] for e in lista]
-            if cod_val in codigos_ya:
-                st.warning(f"⚠️ La cuenta {cod_val} ya fue agregada a esta sección.")
-            else:
-                lista.append({
-                    "codigo": cod_val,
-                    "nombre": nom_val,
-                    "signo": "+",
-                    "f22": f22_val,
-                    "monto": int(monto_val),
-                    "es_manual": True,
-                })
-                # Limpiar campos
-                for k in [key_cod, key_nom, key_monto, key_f22]:
-                    if k in st.session_state:
-                        del st.session_state[k]
-                st.rerun()
+            cod_val = f"M_{uuid.uuid4().hex[:6].upper()}"
+            lista.append({
+                "codigo": cod_val,
+                "nombre": nom_val,
+                "signo": "+",
+                "f22": f22_val,
+                "monto": int(monto_val),
+                "es_manual": True,
+            })
+            # Limpiar campos
+            for k in [key_nom, key_monto, key_f22]:
+                if k in st.session_state:
+                    del st.session_state[k]
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -1140,17 +1125,32 @@ def render_calculo(cuentas: dict, total_ing: int, total_egr: int, total_gst: int
         ppm_editado = 0
         st.session_state["montos_editados"][key_ppm] = 0
 
+    # Remanente Crédito por IDPC (opcional)
+    key_cred_idpc = "monto_credito_idpc_calc"
+    if "credito_idpc" not in elim_calc:
+        cred_idpc_val = st.session_state["montos_editados"].get(key_cred_idpc, 0)
+        col_c1, col_c2, col_c3 = st.columns([3, 2, 1])
+        col_c1.markdown("**Remanente Crédito por IDPC (opcional)**")
+        credito_idpc_editado = col_c2.number_input("", value=cred_idpc_val, min_value=0, step=1000, key=key_cred_idpc, label_visibility="collapsed")
+        st.session_state["montos_editados"][key_cred_idpc] = credito_idpc_editado
+        if col_c3.button("🗑️", key="del_calc_credito_idpc", help="Eliminar"):
+            st.session_state["eliminadas_calc"].append("credito_idpc")
+            st.rerun()
+    else:
+        credito_idpc_editado = 0
+        st.session_state["montos_editados"][key_cred_idpc] = 0
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     # -----------------------------------------------------------------------
     if modo == "sin":
-        _render_sin_incentivo(total_ing, total_egr, total_gst, ppm_editado)
+        _render_sin_incentivo(total_ing, total_egr, total_gst, ppm_editado, credito_idpc_editado)
     else:
-        _render_con_incentivo(cuentas, total_ing, total_egr, total_gst, ppm_editado)
+        _render_con_incentivo(cuentas, total_ing, total_egr, total_gst, ppm_editado, credito_idpc_editado)
 
 
-def _render_sin_incentivo(total_ing, total_egr, total_gst, ppm):
-    resultado = calcular_sin_incentivo(total_ing, total_egr, total_gst, ppm)
+def _render_sin_incentivo(total_ing, total_egr, total_gst, ppm, credito_idpc):
+    resultado = calcular_sin_incentivo(total_ing, total_egr, total_gst, ppm, credito_idpc)
 
     st.markdown("""
     <div class="resultado-bloque">
@@ -1165,6 +1165,7 @@ def _render_sin_incentivo(total_ing, total_egr, total_gst, ppm):
     _fila_resultado(f"IDPC Tasa {TASA_IDPC*100:.1f}%", resultado.idpc_sin_incentivo, "(=)", "18",
                     clase_extra="idpc")
     _fila_resultado("101090 PPM", resultado.ppm, "(-)", "36")
+    _fila_resultado("Remanente Crédito por IDPC (opcional)", resultado.credito_idpc, "(-)", "")
     st.markdown("<hr class='sep'>", unsafe_allow_html=True)
 
     if resultado.saldo_sin_incentivo < 0:
@@ -1184,7 +1185,7 @@ def _render_sin_incentivo(total_ing, total_egr, total_gst, ppm):
     render_export_btn(resultado, modo="sin")
 
 
-def _render_con_incentivo(cuentas, total_ing, total_egr, total_gst, ppm):
+def _render_con_incentivo(cuentas, total_ing, total_egr, total_gst, ppm, credito_idpc):
     st.markdown("""
     <div class="resultado-bloque">
         <h4>✅ Con Incentivo al Ahorro (Art. 14 letra E) LIR)</h4>
@@ -1208,20 +1209,56 @@ def _render_con_incentivo(cuentas, total_ing, total_egr, total_gst, ppm):
     elim_calc = set(st.session_state.get("eliminadas_calc", []))
 
     # Retiros
-    retiros_balance = get_valor(cuentas, "101120", "activos")
-    key_ret = "monto_retiros_101120"
-    if "101120" not in elim_calc:
-        ret_editado = retiros_balance
-        st.session_state["montos_editados"][key_ret] = ret_editado
-        col_r1, col_r2, col_r3 = st.columns([3, 2, 1])
-        col_r1.markdown("**101120 — Retiros del Ejercicio (históricos)**")
-        col_r2.markdown(f"**{fmt_monto(ret_editado)}**")
-        if col_r3.button("🗑️", key="del_calc_retiros", help="Eliminar"):
-            st.session_state["eliminadas_calc"].append("101120")
-            st.rerun()
-    else:
-        ret_editado = 0
-        st.session_state["montos_editados"][key_ret] = 0
+    if "extras_retiros" not in st.session_state:
+        st.session_state["extras_retiros"] = []
+
+    st.markdown("##### Retiros del Ejercicio (históricos)")
+    total_retiros = 0
+    cods_retiros_default = ["101120", "106102"]
+
+    for cr in cods_retiros_default:
+        key_ret = f"monto_retiros_{cr}"
+        if f"{cr}_calc" not in elim_calc and cr not in elim_calc:
+            val_bal = get_valor(cuentas, cr, "activos")
+            nombre_bal = get_nombre(cuentas, cr)
+            if not nombre_bal:
+                nombre_bal = "Retiros del Ejercicio" if cr == "101120" else "Retiros"
+                
+            val_editado = st.session_state["montos_editados"].get(key_ret, val_bal)
+
+            col_r1, col_r2, col_r3 = st.columns([3, 2, 1])
+            col_r1.markdown(f"**{cr} — {nombre_bal}**")
+            nuevo_val = col_r2.number_input("", value=val_editado, min_value=0, step=1000, key=key_ret, label_visibility="collapsed")
+            st.session_state["montos_editados"][key_ret] = nuevo_val
+            total_retiros += nuevo_val
+
+            if col_r3.button("🗑️", key=f"del_calc_retiros_{cr}", help="Eliminar"):
+                st.session_state["eliminadas_calc"].append(f"{cr}_calc")
+                st.rerun()
+        else:
+            st.session_state["montos_editados"][key_ret] = 0
+
+    # Retiros manuales extras
+    idxs_eliminar_retiros = []
+    for i, ex in enumerate(st.session_state["extras_retiros"]):
+        key_ex = f"monto_retiros_ext_{i}"
+        val_ex = st.session_state["montos_editados"].get(key_ex, ex["monto"])
+
+        col_ex1, col_ex2, col_ex3 = st.columns([3, 2, 1])
+        col_ex1.markdown(f"**{ex['nombre']}**")
+        nuevo_val_ex = col_ex2.number_input("", value=val_ex, min_value=0, step=1000, key=key_ex, label_visibility="collapsed")
+        st.session_state["montos_editados"][key_ex] = nuevo_val_ex
+        total_retiros += nuevo_val_ex
+
+        if col_ex3.button("🗑️", key=f"del_retiros_ext_{i}", help="Eliminar"):
+            idxs_eliminar_retiros.append(i)
+
+    for idx in sorted(idxs_eliminar_retiros, reverse=True):
+        st.session_state["extras_retiros"].pop(idx)
+        st.rerun()
+
+    with st.expander("➕ Agregar otra cuenta a Retiros"):
+        _render_agregar_cuenta_manual("ret", "extras_retiros")
 
     # Multas históricas
     multas_bal = get_valor(cuentas, "430102", "perdidas")
@@ -1259,11 +1296,11 @@ def _render_con_incentivo(cuentas, total_ing, total_egr, total_gst, ppm):
 
     resultado = calcular_con_incentivo(
         total_ing, total_egr, total_gst, ppm,
-        ret_editado, mul_editado, idpc_editado, uf_pesos
+        total_retiros, mul_editado, idpc_editado, uf_pesos, credito_idpc
     )
 
     _fila_resultado("Sub Total Base Imponible",      resultado.sub_total_base,  "(=)", "")
-    _fila_resultado("101120 Retiros del Ejercicio",  resultado.retiros_ejercicio, "(-)", "")
+    _fila_resultado("Retiros del Ejercicio",         resultado.retiros_ejercicio, "(-)", "")
     _fila_resultado("430102 Multas e Intereses",     resultado.multas_intereses_hist, "(-)", "")
     _fila_resultado("430101 Pago del IDPC",          resultado.idpc_hist,        "(-)", "")
     st.markdown("<hr class='sep'>", unsafe_allow_html=True)
@@ -1287,6 +1324,7 @@ def _render_con_incentivo(cuentas, total_ing, total_egr, total_gst, ppm):
     _fila_resultado(f"IDPC Tasa {TASA_IDPC*100:.1f}%", resultado.idpc_con_incentivo, "(=)", "18",
                     clase_extra="idpc")
     _fila_resultado("101090 PPM",                    resultado.ppm,               "(-)", "36")
+    _fila_resultado("Remanente Crédito por IDPC (opcional)",              resultado.credito_idpc,      "(-)", "")
     st.markdown("<hr class='sep'>", unsafe_allow_html=True)
 
     if resultado.saldo_con_incentivo < 0:
